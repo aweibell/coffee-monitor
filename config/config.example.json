@@ -1,0 +1,71 @@
+{
+  "roastery": {
+    "name": "Stavanger Kaffebrenneri",
+    "baseUrl": "https://stavangerkaffebrenneri.no/",
+    "shopUrl": "https://www.stavangerkaffebrenneri.no/categories/kun-okologisk-kaffe",
+    "selectors": {
+      "productContainer": ".product",
+      "name": ".title",
+      "price": ".price",
+      "description": "",
+      "link": "a",
+      "availability": ""
+    }
+  },
+  "monitoring": {
+    "checkInterval": "0 9 * * *",
+    "maxRetries": 3,
+    "requestTimeout": 30000,
+    "screenshotOnError": true
+  },
+  "notifications": {
+    "email": {
+      "enabled": true,
+      "smtp": {
+        "host": "smtp.gmail.com",
+        "port": 587,
+        "secure": false,
+        "auth": {
+          "user": "aweibell@gmail.com",
+          "pass": "your-app-password"
+        }
+      },
+      "from": "aweibell@gmail.com",
+      "to": ["atle@weibell.no"],
+      "subject": "☕ [coffee-monitor] Ny kaffi frå Stavanger Kaffebrenneri!"
+    },
+    "desktop": {
+      "enabled": true,
+      "title": "Coffee Monitor",
+      "sound": true
+    },
+    "telegram": {
+      "enabled": true,
+      "title": "Coffee Monitor",
+      "sound": true
+    }
+  },
+  "favorites": [
+    {
+      "pattern": "Etiopia",
+      "description": "Etiopisk kaffi (Note: Favorites are now managed via CLI with multiple terms support)"
+    },
+    {
+      "pattern": "Koffeinfri", 
+      "description": "Koffeinfri kaffi"
+    },
+    {
+      "pattern": "Bærtørket",
+      "description": "Natural processed coffees"
+    }
+  ],
+  "database": {
+    "path": "./data/coffee.db"
+  },
+  "logging": {
+    "level": "info",
+    "file": "./logs/coffee-monitor.log",
+    "maxSize": "10MB",
+    "maxFiles": 5
+  }
+}

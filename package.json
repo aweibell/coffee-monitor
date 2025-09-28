@@ -1,0 +1,25 @@
+{
+  "name": "coffee-monitor",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "description": "A web scraping service to monitor coffee roastery product availability and notify when favorites are in stock",
+  "scripts": {
+    "start": "node src/index.js start",
+    "check": "node src/index.js check",
+    "setup": "node src/index.js setup",
+    "report": "node src/index.js report",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["web-scraping", "coffee", "monitoring", "notifications"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.2.2",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^7.0.6",
+    "puppeteer": "^24.22.3",
+    "sqlite3": "^5.1.7",
+    "yargs": "^17.7.2"
+  }
+}
