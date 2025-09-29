@@ -35,7 +35,7 @@ class CoffeeScraper {
             });
 
             // Wait for products to load - this might need customization per site
-            await this.page.waitForTimeout(2000);
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
             const content = await this.page.content();
             const $ = cheerio.load(content);

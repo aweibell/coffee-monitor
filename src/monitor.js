@@ -289,10 +289,22 @@ class CoffeeMonitor {
             const availableFavorites = [];
             for (const product of availableProducts) {
                 for (const favorite of favorites) {
-                    if (product.name.toLowerCase().includes(favorite.product_name_pattern.toLowerCase())) {
+                    let matches = false;
+                    let matchedTerms = [];
+                    
+                    // Check if any of the favorite's terms match the product name
+                    for (const term of favorite.terms) {
+                        if (product.name.toLowerCase().includes(term.toLowerCase())) {
+                            matches = true;
+                            matchedTerms.push(term);
+                        }
+                    }
+                    
+                    if (matches) {
                         availableFavorites.push({
                             ...product,
-                            favoritePattern: favorite.product_name_pattern
+                            favoritePattern: matchedTerms.join(', '),
+                            favoriteName: favorite.name
                         });
                         break;
                     }
