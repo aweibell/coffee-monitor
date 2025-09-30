@@ -195,6 +195,35 @@ class Database {
         return favoriteId;
     }
 
+    async updateFavorite(id, name, description = '', terms = [], sizePreference = 'both', organicOnly = false) {
+        // Update the favorite
+        await this.run(
+            'UPDATE user_favorites SET name = ?, description = ?, size_preference = ?, organic_only = ? WHERE id = ?',
+            [name, description, sizePreference, organicOnly ? 1 : 0, id]
+        );
+        
+        // Delete existing terms
+        await this.run('DELETE FROM favorite_terms WHERE favorite_id = ?', [id]);
+        
+        // Insert new terms
+        if (terms.length > 0) {
+            for (const term of terms) {
+                await this.run(
+                    'INSERT INTO favorite_terms (favorite_id, term) VALUES (?, ?)',
+                    [id, term.trim()]
+                );
+            }
+        } else {
+            // If no terms provided, use the name as the term
+            await this.run(
+                'INSERT INTO favorite_terms (favorite_id, term) VALUES (?, ?)',
+                [id, name]
+            );
+        }
+        
+        return id;
+    }
+
     async removeFavorite(id) {
         // Terms will be deleted automatically due to CASCADE
         await this.run('DELETE FROM user_favorites WHERE id = ?', [id]);

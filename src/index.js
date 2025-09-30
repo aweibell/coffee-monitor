@@ -61,7 +61,13 @@ const argv = yargs(hideBin(process.argv))
             alias: 'o',
             description: 'Only notify for organic products',
             type: 'boolean'
-        }
+        },
+        'update': {
+            alias: 'u',
+            description: 'Update existing favorite if it exists (default behavior)',
+            type: 'boolean',
+            default: true
+        },
     }, async (argv) => {
         await manageFavorites(argv);
     })
@@ -265,7 +271,22 @@ async function manageFavorites(argv) {
             // Check if favorite already exists
             const existing = await monitor.database.getFavoriteByName(name);
             if (existing) {
-                console.log(`⚠️  Favorite "${name}" already exists`);
+                if (argv.update !== false) {
+                    // Update existing favorite (default behavior) - use existing values for unspecified fields
+                    const updatedDescription = argv.description !== undefined ? description : existing.description;
+                    const updatedSizePreference = argv['size-preference'] !== undefined ? sizePreference : existing.size_preference;
+                    const updatedOrganicOnly = argv['organic-only'] !== undefined ? organicOnly : existing.organic_only;
+                    const updatedTerms = argv.terms !== undefined ? terms : existing.terms;
+                    
+                    await monitor.database.updateFavorite(existing.id, name, updatedDescription, updatedTerms, updatedSizePreference, updatedOrganicOnly);
+                    console.log(`✅ Updated favorite: "${name}"`);
+                    console.log(`   Search terms: ${updatedTerms.join(', ')}`);
+                    if (updatedDescription) console.log(`   Description: ${updatedDescription}`);
+                    if (updatedSizePreference !== 'both') console.log(`   Size preference: ${updatedSizePreference}`);
+                    if (updatedOrganicOnly) console.log(`   Organic only: Yes`);
+                } else {
+                    console.log(`⚠️  Favorite "${name}" already exists (use --update to modify)`);
+                }
             } else {
                 await monitor.database.addFavorite(name, description, terms, sizePreference, organicOnly);
                 console.log(`✅ Added favorite: "${name}"`);
@@ -289,6 +310,7 @@ async function manageFavorites(argv) {
             console.log('  --add "Ethiopian" --terms "ethiopia,etiopia"        # With additional search terms');
             console.log('  -a "Decaf" -t "koffeinfri" -d "Decaf coffee"        # With description');
             console.log('  -a "Colombian" -s "1kg" -o                          # 1kg only, organic only');
+            console.log('  -a "Colombia" -s "both" -d "Updated description"     # Updates existing favorite');
             console.log('  --remove "Colombian"                                # Remove by name');
         }
         
