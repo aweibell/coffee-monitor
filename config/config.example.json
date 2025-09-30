@@ -2,7 +2,24 @@
   "roastery": {
     "name": "Stavanger Kaffebrenneri",
     "baseUrl": "https://stavangerkaffebrenneri.no/",
-    "shopUrl": "https://www.stavangerkaffebrenneri.no/categories/kun-okologisk-kaffe",
+    "shopUrls": [
+      {
+        "url": "https://www.stavangerkaffebrenneri.no/categories/kun-okologisk-kaffe",
+        "metadata": {
+          "organic": true,
+          "category": "all_sizes",
+          "description": "Organic coffee - all sizes"
+        }
+      },
+      {
+        "url": "https://www.stavangerkaffebrenneri.no/categories/kaffe-1000g",
+        "metadata": {
+          "organic": false,
+          "category": "1kg",
+          "description": "All coffee - 1kg packages"
+        }
+      }
+    ],
     "selectors": {
       "productContainer": ".product",
       "name": ".title",

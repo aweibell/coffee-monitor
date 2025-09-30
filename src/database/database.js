@@ -39,6 +39,10 @@ class Database {
                 url TEXT,
                 price REAL,
                 description TEXT,
+                organic BOOLEAN,
+                size_category TEXT,
+                source_url TEXT,
+                source_description TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(name)
@@ -56,6 +60,8 @@ class Database {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 description TEXT,
+                size_preference TEXT DEFAULT 'both',
+                organic_only BOOLEAN DEFAULT 0,
                 notification_enabled BOOLEAN DEFAULT 1,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )`,
@@ -117,7 +123,7 @@ class Database {
     }
 
     async saveProduct(productData) {
-        const { name, url, price, description } = productData;
+        const { name, url, price, description, organic, size_category, source_url, source_description } = productData;
         
         // Check if product exists
         const existing = await this.get('SELECT id FROM products WHERE name = ?', [name]);
@@ -125,15 +131,15 @@ class Database {
         if (existing) {
             // Update existing product
             await this.run(
-                'UPDATE products SET url = ?, price = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?',
-                [url, price, description, name]
+                'UPDATE products SET url = ?, price = ?, description = ?, organic = ?, size_category = ?, source_url = ?, source_description = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?',
+                [url, price, description, organic, size_category, source_url, source_description, name]
             );
             return existing.id;
         } else {
             // Insert new product
             const result = await this.run(
-                'INSERT INTO products (name, url, price, description) VALUES (?, ?, ?, ?)',
-                [name, url, price, description]
+                'INSERT INTO products (name, url, price, description, organic, size_category, source_url, source_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [name, url, price, description, organic, size_category, source_url, source_description]
             );
             return result.id;
         }
@@ -161,11 +167,11 @@ class Database {
         return favorites;
     }
 
-    async addFavorite(name, description = '', terms = []) {
+    async addFavorite(name, description = '', terms = [], sizePreference = 'both', organicOnly = false) {
         // Insert favorite
         const result = await this.run(
-            'INSERT INTO user_favorites (name, description) VALUES (?, ?)',
-            [name, description]
+            'INSERT INTO user_favorites (name, description, size_preference, organic_only) VALUES (?, ?, ?, ?)',
+            [name, description, sizePreference, organicOnly ? 1 : 0]
         );
         
         const favoriteId = result.id;

@@ -50,6 +50,17 @@ const argv = yargs(hideBin(process.argv))
             alias: 'd',
             description: 'Description for the favorite',
             type: 'string'
+        },
+        'size-preference': {
+            alias: 's',
+            description: 'Size preference: 250g, 1kg, or both',
+            type: 'string',
+            choices: ['250g', '1kg', 'both']
+        },
+        'organic-only': {
+            alias: 'o',
+            description: 'Only notify for organic products',
+            type: 'boolean'
         }
     }, async (argv) => {
         await manageFavorites(argv);
@@ -217,6 +228,12 @@ async function manageFavorites(argv) {
                     const termsStr = fav.terms.join(', ');
                     console.log(`  ${index + 1}. "${fav.name}" - ${fav.description || 'No description'}`);
                     console.log(`     Search terms: ${termsStr}`);
+                    if (fav.size_preference && fav.size_preference !== 'both') {
+                        console.log(`     Size preference: ${fav.size_preference}`);
+                    }
+                    if (fav.organic_only) {
+                        console.log(`     Organic only: Yes`);
+                    }
                 });
             }
         } else if (argv.add) {
@@ -242,16 +259,20 @@ async function manageFavorites(argv) {
             }
             
             const description = argv.description || '';
+            const sizePreference = argv['size-preference'] || 'both';
+            const organicOnly = argv['organic-only'] || false;
             
             // Check if favorite already exists
             const existing = await monitor.database.getFavoriteByName(name);
             if (existing) {
                 console.log(`⚠️  Favorite "${name}" already exists`);
             } else {
-                await monitor.database.addFavorite(name, description, terms);
+                await monitor.database.addFavorite(name, description, terms, sizePreference, organicOnly);
                 console.log(`✅ Added favorite: "${name}"`);
                 console.log(`   Search terms: ${terms.join(', ')}`);
                 if (description) console.log(`   Description: ${description}`);
+                if (sizePreference !== 'both') console.log(`   Size preference: ${sizePreference}`);
+                if (organicOnly) console.log(`   Organic only: Yes`);
             }
         } else if (argv.remove) {
             const existing = await monitor.database.getFavoriteByName(argv.remove);
@@ -267,6 +288,7 @@ async function manageFavorites(argv) {
             console.log('  --add "Colombia"                                    # Simple: name becomes search term');
             console.log('  --add "Ethiopian" --terms "ethiopia,etiopia"        # With additional search terms');
             console.log('  -a "Decaf" -t "koffeinfri" -d "Decaf coffee"        # With description');
+            console.log('  -a "Colombian" -s "1kg" -o                          # 1kg only, organic only');
             console.log('  --remove "Colombian"                                # Remove by name');
         }
         

@@ -86,29 +86,47 @@ class CoffeeMonitor {
         this.log('info', 'Starting product check...');
 
         try {
-            const roasteryConfig = this.config.getRoasteryConfig();
+            const shopUrls = this.config.getShopUrls();
             
             // Initialize scraper
             await this.scraper.init();
-            this.log('info', `Scraping products from ${roasteryConfig.shopUrl}`);
             
-            // Scrape products
-            const scrapedProducts = await this.scraper.scrapeProducts(roasteryConfig.shopUrl);
-            this.log('info', `Found ${scrapedProducts.length} products`);
+            let allScrapedProducts = [];
+            
+            // Scrape each URL
+            for (const urlConfig of shopUrls) {
+                this.log('info', `Scraping products from ${urlConfig.url} (${urlConfig.metadata.description})`);
+                
+                const scrapedProducts = await this.scraper.scrapeProducts(urlConfig.url);
+                
+                // Add metadata to each product
+                const productsWithMetadata = scrapedProducts.map(product => ({
+                    ...product,
+                    organic: urlConfig.metadata.organic,
+                    size_category: urlConfig.metadata.category,
+                    source_url: urlConfig.url,
+                    source_description: urlConfig.metadata.description
+                }));
+                
+                allScrapedProducts = allScrapedProducts.concat(productsWithMetadata);
+                this.log('info', `Found ${scrapedProducts.length} products from ${urlConfig.metadata.description}`);
+            }
+            
+            this.log('info', `Found ${allScrapedProducts.length} total products from ${shopUrls.length} sources`);
 
-            if (scrapedProducts.length === 0) {
+            if (allScrapedProducts.length === 0) {
                 this.log('warn', 'No products found - might be a scraping issue');
                 return;
             }
 
             const results = {
-                newProducts: [],
-                availableFavorites: [],
-                totalChecked: scrapedProducts.length
+            newProducts: [],
+            availableFavorites: [],
+            totalChecked: allScrapedProducts.length
             };
 
             // Process each product
-            for (const productData of scrapedProducts) {
+            for (const productData of allScrapedProducts) {
                 try {
                     // Save or update product
                     const productId = await this.database.saveProduct(productData);
@@ -144,23 +162,41 @@ class CoffeeMonitor {
                             }
                             
                             if (matches) {
-                                // Check if we've already notified about this recently
-                                const recentlyNotified = await this.database.wasNotificationSentRecently(
-                                    productId, 'favorite_available', 24
-                                );
+                                // Apply preferences filtering
+                                let shouldNotify = true;
+                                
+                                // Check organic preference
+                                if (favorite.organic_only && !productData.organic) {
+                                    shouldNotify = false;
+                                }
+                                
+                                // Check size preference
+                                if (favorite.size_preference && favorite.size_preference !== 'both') {
+                                    const productSize = this.extractSizeFromName(productData.name);
+                                    if (productSize && productSize !== favorite.size_preference) {
+                                        shouldNotify = false;
+                                    }
+                                }
+                                
+                                if (shouldNotify) {
+                                    // Check if we've already notified about this recently
+                                    const recentlyNotified = await this.database.wasNotificationSentRecently(
+                                        productId, 'favorite_available', 24
+                                    );
 
-                                if (!recentlyNotified) {
-                                    results.availableFavorites.push({
-                                        product: {
-                                            ...productData,
-                                            id: productId,
-                                            current_price: productData.price
-                                        },
-                                        favoriteName: favorite.name,
-                                        matchedTerms: favorite.terms.filter(term => 
-                                            productData.name.toLowerCase().includes(term.toLowerCase())
-                                        )
-                                    });
+                                    if (!recentlyNotified) {
+                                        results.availableFavorites.push({
+                                            product: {
+                                                ...productData,
+                                                id: productId,
+                                                current_price: productData.price
+                                            },
+                                            favoriteName: favorite.name,
+                                            matchedTerms: favorite.terms.filter(term => 
+                                                productData.name.toLowerCase().includes(term.toLowerCase())
+                                            )
+                                        });
+                                    }
                                 }
                                 break; // Don't match the same product multiple times
                             }
@@ -324,6 +360,17 @@ class CoffeeMonitor {
             this.log('error', 'Failed to generate report', { error: error.message });
             throw error;
         }
+    }
+
+    extractSizeFromName(productName) {
+        const name = productName.toLowerCase();
+        if (name.includes('250g') || name.includes('250 g')) {
+            return '250g';
+        }
+        if (name.includes('1kg') || name.includes('1 kg') || name.includes('1000g')) {
+            return '1kg';
+        }
+        return null; // Unknown size
     }
 
     async close() {

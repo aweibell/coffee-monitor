@@ -31,8 +31,12 @@ class Config {
         // Required fields validation
         const required = {
             'roastery.baseUrl': this.config.roastery?.baseUrl,
-            'roastery.shopUrl': this.config.roastery?.shopUrl,
         };
+
+        // Support both old shopUrl and new shopUrls format
+        if (!this.config.roastery?.shopUrl && !this.config.roastery?.shopUrls) {
+            throw new Error('Required config field missing: roastery.shopUrl or roastery.shopUrls');
+        }
 
         for (const [field, value] of Object.entries(required)) {
             if (!value) {
@@ -98,6 +102,27 @@ class Config {
 
     getRoasteryConfig() {
         return this.config.roastery;
+    }
+
+    getShopUrls() {
+        // Support new shopUrls format
+        if (this.config.roastery?.shopUrls) {
+            return this.config.roastery.shopUrls;
+        }
+        
+        // Backward compatibility with old shopUrl format
+        if (this.config.roastery?.shopUrl) {
+            return [{
+                url: this.config.roastery.shopUrl,
+                metadata: {
+                    organic: true, // Assume organic for backward compatibility
+                    category: "all_sizes",
+                    description: "Legacy single URL"
+                }
+            }];
+        }
+        
+        return [];
     }
 
     getNotificationConfig() {
