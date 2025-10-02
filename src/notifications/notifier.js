@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 class Notifier {
     constructor(config) {
@@ -18,9 +19,13 @@ class Notifier {
                 await this.emailTransporter.verify();
                 console.log('Email transporter initialized successfully');
             } catch (error) {
-                console.warn('Email transporter initialization failed:', error.message);
+                // Silently disable email notifications if initialization fails
                 this.emailTransporter = null;
+                this.config.email.enabled = false;
             }
+        } else {
+            // Email is disabled or not configured
+            this.emailTransporter = null;
         }
     }
 
@@ -30,6 +35,9 @@ class Notifier {
         switch (type) {
             case 'favorite_available':
                 notifications.push(...await this.notifyFavoriteAvailable(data));
+                break;
+            case 'favorites_available_grouped':
+                notifications.push(...await this.notifyFavoritesAvailableGrouped(data));
                 break;
             case 'new_products':
                 notifications.push(...await this.notifyNewProducts(data));
@@ -80,6 +88,69 @@ class Notifier {
             }
         }
 
+        // Telegram notification
+        if (this.config.telegram?.enabled) {
+            try {
+                const telegramSent = await this.sendTelegramNotification(message, 'favorite');
+                if (telegramSent) {
+                    notifications.push({ type: 'telegram', success: true, message: 'Telegram notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'telegram', success: false, error: error.message });
+            }
+        }
+
+        return notifications;
+    }
+
+    async notifyFavoritesAvailableGrouped(data) {
+        const { favorites } = data;
+        const notifications = [];
+
+        if (favorites.length === 0) return notifications;
+
+        const message = {
+            title: `☕ ${favorites.length} Favorittkaffiar tilgjengelege!`,
+            body: `${favorites.length} av dine favorittkaffiar er no tilgjengelege hjå ${this.config.roastery?.name || 'eit kaffibrenneri'}!`,
+            favorites: favorites
+        };
+
+        // Email notification
+        if (this.config.email?.enabled) {
+            try {
+                const emailSent = await this.sendEmailNotification(message, 'favorites_grouped');
+                if (emailSent) {
+                    notifications.push({ type: 'email', success: true, message: 'Email sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'email', success: false, error: error.message });
+            }
+        }
+
+        // Desktop notification
+        if (this.config.desktop?.enabled) {
+            try {
+                const desktopSent = await this.sendDesktopNotification(message);
+                if (desktopSent) {
+                    notifications.push({ type: 'desktop', success: true, message: 'Desktop notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'desktop', success: false, error: error.message });
+            }
+        }
+
+        // Telegram notification
+        if (this.config.telegram?.enabled) {
+            try {
+                const telegramSent = await this.sendTelegramNotification(message, 'favorites_grouped');
+                if (telegramSent) {
+                    notifications.push({ type: 'telegram', success: true, message: 'Telegram notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'telegram', success: false, error: error.message });
+            }
+        }
+
         return notifications;
     }
 
@@ -106,6 +177,18 @@ class Notifier {
             }
         }
 
+        // Telegram notification
+        if (this.config.telegram?.enabled) {
+            try {
+                const telegramSent = await this.sendTelegramNotification(message, 'new_products');
+                if (telegramSent) {
+                    notifications.push({ type: 'telegram', success: true, message: 'Telegram notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'telegram', success: false, error: error.message });
+            }
+        }
+
         return notifications;
     }
 
@@ -120,7 +203,7 @@ class Notifier {
             context: context
         };
 
-        // Only send error notifications via email to avoid spam
+        // Send error notifications via email and telegram
         if (this.config.email?.enabled) {
             try {
                 const emailSent = await this.sendEmailNotification(message, 'error');
@@ -129,6 +212,18 @@ class Notifier {
                 }
             } catch (error) {
                 notifications.push({ type: 'email', success: false, error: error.message });
+            }
+        }
+
+        // Telegram error notification
+        if (this.config.telegram?.enabled) {
+            try {
+                const telegramSent = await this.sendTelegramNotification(message, 'error');
+                if (telegramSent) {
+                    notifications.push({ type: 'telegram', success: true, message: 'Error Telegram notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'telegram', success: false, error: error.message });
             }
         }
 
@@ -190,6 +285,37 @@ class Notifier {
                 if (product.description) text += `Beskrivelse: ${product.description}\n`;
                 if (product.url) text += `URL: ${product.url}\n`;
                 text += `\nBestill før det blir utsolgt! ☕`;
+                break;
+
+            case 'favorites_grouped':
+                html += `
+                    <p>Hei! 🎉</p>
+                    <p>${message.favorites.length} av dine favorittkaffiar er no tilgjengelege:</p>
+                    <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;\">
+                `;
+                
+                text += `Hei! 🎉\n\n${message.favorites.length} av dine favorittkaffiar er no tilgjengelege:\n\n`;
+                
+                message.favorites.forEach((favoriteData, index) => {
+                    const product = favoriteData.product;
+                    html += `
+                        <div style=\"margin-bottom: 15px; ${index > 0 ? 'border-top: 1px solid #ddd; padding-top: 15px;' : ''}\">
+                            <h4 style=\"color: #8B4513; margin: 0;\">${product.name}</h4>
+                            ${product.current_price ? `<p style=\"margin: 5px 0;\"><strong>Pris:</strong> ${product.current_price} kr</p>` : ''}
+                            <p style=\"margin: 5px 0; font-style: italic; color: #666;\">Matches: ${favoriteData.favoriteName}</p>
+                            ${product.url ? `<p style=\"margin: 5px 0;\"><a href=\"${product.url}\" style=\"color: #8B4513;\">Vis produkt</a></p>` : ''}
+                        </div>
+                    `;
+                    
+                    text += `${product.name}\n`;
+                    if (product.current_price) text += `Pris: ${product.current_price} kr\n`;
+                    text += `Matches: ${favoriteData.favoriteName}\n`;
+                    if (product.url) text += `URL: ${product.url}\n`;
+                    text += `\n`;
+                });
+                
+                html += `</div><p>Køyr og bestill før dei blir utsolgt! ☕</p>`;
+                text += `Køyr og bestill før dei blir utsolgt! ☕`;
                 break;
 
             case 'new_products':
@@ -269,11 +395,158 @@ class Notifier {
         }
     }
 
-    async sendTelegramNotification(message) {
-        // Placeholder for Telegram notifications
-        // Would need telegram bot setup
-        console.log('Telegram notification (not implemented):', message.title);
+    async sendTelegramNotification(message, templateType = 'basic') {
+        if (!this.config.telegram?.enabled || !this.config.telegram.botToken || !this.config.telegram.chatId) {
+            return false;
+        }
+
+        try {
+            const text = this.generateTelegramMessage(message, templateType);
+            const success = await this.sendTelegramMessage(text);
+            if (success) {
+                console.log('Telegram notification sent successfully');
+                return true;
+            }
+        } catch (error) {
+            console.error('Failed to send Telegram notification:', error.message);
+        }
         return false;
+    }
+
+    generateTelegramMessage(message, templateType) {
+        // Ensure message has a title, fallback to empty string if not
+        const title = message?.title || 'Coffee Monitor Notification';
+        let text = `${title}\n\n`;
+
+        switch (templateType) {
+            case 'favorite':
+                const product = message.product;
+                text += `Hei! 🎉\n\n`;
+                text += `Ein av dine favorittkaffiar er no tilgjengeleg:\n\n`;
+                text += `☕ *${product.name}*\n`;
+                if (product.current_price) text += `💰 Pris: ${product.current_price} kr\n`;
+                if (product.description) text += `📝 ${product.description}\n`;
+                if (product.url) text += `🔗 [Vis produkt](${product.url})\n`;
+                text += `\n🚀 Bestill før det blir utsolgt!`;
+                break;
+
+            case 'favorites_grouped':
+                // Validate that we have favorites array
+                if (!message.favorites || !Array.isArray(message.favorites) || message.favorites.length === 0) {
+                    text += `Hei! 🎉\n\n`;
+                    text += `Favorittkaffiar er tilgjengelege, men kunne ikkje laste detaljar.\n\n`;
+                    text += `🚀 Sjekk nettsida for meir informasjon!`;
+                    break;
+                }
+                
+                text += `Hei! 🎉\n\n`;
+                text += `${message.favorites.length} av dine favorittkaffiar er no tilgjengelege:\n\n`;
+                
+                message.favorites.forEach((favoriteData, index) => {
+                    // Validate favorite data structure
+                    if (!favoriteData || !favoriteData.product) {
+                        text += `${index + 1}. ☕ Ukjent produkt\n\n`;
+                        return;
+                    }
+                    
+                    const product = favoriteData.product;
+                    const productName = product.name || 'Ukjent kaffi';
+                    
+                    text += `${index + 1}. ☕ *${productName}*\n`;
+                    if (product.current_price) text += `   💰 ${product.current_price} kr\n`;
+                    if (favoriteData.favoriteName) text += `   ⭐ Matches: ${favoriteData.favoriteName}\n`;
+                    if (product.url) text += `   🔗 [Vis produkt](${product.url})\n`;
+                    text += `\n`;
+                });
+                
+                text += `🚀 Køyr og bestill før dei blir utsolgt!`;
+                break;
+
+            case 'new_products':
+                text += `Hei! 🆕\n\n`;
+                text += `${message.products.length} nye kaffiprodukt er oppdaga:\n\n`;
+                
+                message.products.slice(0, 10).forEach((product, index) => {
+                    text += `${index + 1}. *${product.name}*\n`;
+                    if (product.current_price) text += `   💰 ${product.current_price} kr\n`;
+                    if (product.url) text += `   🔗 [Vis produkt](${product.url})\n`;
+                    text += `\n`;
+                });
+                
+                if (message.products.length > 10) {
+                    text += `... og ${message.products.length - 10} fleire produkt!\n`;
+                }
+                break;
+
+            case 'error':
+                text += `⚠️ Det oppstod ein feil i coffee monitor:\n\n`;
+                text += `🔴 *Feil:* ${message.error.message}\n`;
+                if (message.context) text += `📋 *Kontekst:* ${message.context}\n`;
+                break;
+
+            default:
+                text += message.body || 'Coffee Monitor notification';
+        }
+
+        return text;
+    }
+
+    sendTelegramMessage(text) {
+        return new Promise((resolve) => {
+            // Validate text is not empty or just whitespace
+            if (!text || text.trim().length === 0) {
+                console.error('Telegram message text is empty, aborting send');
+                resolve(false);
+                return;
+            }
+            
+            const data = JSON.stringify({
+                chat_id: this.config.telegram.chatId,
+                text: text,
+                parse_mode: 'Markdown'
+            });
+
+            const options = {
+                hostname: 'api.telegram.org',
+                port: 443,
+                path: `/bot${this.config.telegram.botToken}/sendMessage`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': data.length
+                }
+            };
+
+            const req = https.request(options, (res) => {
+                let responseData = '';
+                res.on('data', (chunk) => {
+                    responseData += chunk;
+                });
+
+                res.on('end', () => {
+                    try {
+                        const response = JSON.parse(responseData);
+                        if (response.ok) {
+                            resolve(true);
+                        } else {
+                            console.error('Telegram API error:', response.description);
+                            resolve(false);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing Telegram response:', error.message);
+                        resolve(false);
+                    }
+                });
+            });
+
+            req.on('error', (error) => {
+                console.error('Telegram request error:', error.message);
+                resolve(false);
+            });
+
+            req.write(data);
+            req.end();
+        });
     }
 
     async close() {
