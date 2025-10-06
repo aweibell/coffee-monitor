@@ -43,13 +43,13 @@
         "port": 587,
         "secure": false,
         "auth": {
-          "user": "aweibell@gmail.com",
+          "user": "your-email@gmail.com",
           "pass": "your-app-password"
         }
       },
-      "from": "aweibell@gmail.com",
-      "to": ["atle@weibell.no"],
-      "subject": "☕ [coffee-monitor] Ny kaffi frå Stavanger Kaffebrenneri!"
+      "from": "your-email@gmail.com",
+      "to": ["recipient@example.com"],
+      "subject": "☕ [coffee-monitor] Your favorite coffee is available!"
     },
     "desktop": {
       "enabled": true,
