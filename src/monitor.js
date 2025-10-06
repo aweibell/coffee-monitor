@@ -100,13 +100,18 @@ class CoffeeMonitor {
                 const scrapedProducts = await this.scraper.scrapeProducts(urlConfig.url);
                 
                 // Add metadata to each product
-                const productsWithMetadata = scrapedProducts.map(product => ({
-                    ...product,
-                    organic: urlConfig.metadata.organic,
-                    size_category: urlConfig.metadata.category,
-                    source_url: urlConfig.url,
-                    source_description: urlConfig.metadata.description
-                }));
+                const productsWithMetadata = scrapedProducts.map(product => {
+                    // Detect organic products based on name content, even if URL isn't marked as organic
+                    const nameBasedOrganic = this.isOrganicByName(product.name);
+                    
+                    return {
+                        ...product,
+                        organic: urlConfig.metadata.organic || nameBasedOrganic,
+                        size_category: urlConfig.metadata.category,
+                        source_url: urlConfig.url,
+                        source_description: urlConfig.metadata.description
+                    };
+                });
                 
                 allScrapedProducts = allScrapedProducts.concat(productsWithMetadata);
                 this.log('info', `Found ${scrapedProducts.length} products from ${urlConfig.metadata.description}`);
@@ -185,18 +190,75 @@ class CoffeeMonitor {
                                     );
 
                                     if (!recentlyNotified) {
-                                        results.availableFavorites.push({
-                                            product: {
-                                                ...productData,
-                                                id: productId,
-                                                current_price: productData.price
-                                            },
-                                            favoriteName: favorite.name,
-                                            matchedTerms: favorite.terms.filter(term => 
-                                                productData.name.toLowerCase().includes(term.toLowerCase())
-                                            )
-                                        });
+                                        // Check for duplicates in the same check based on base product name
+                                        const baseName = this.getBaseProductName(productData.name);
+                                        const existingMatch = results.availableFavorites.find(item => 
+                                            this.getBaseProductName(item.product.name) === baseName &&
+                                            item.favoriteName === favorite.name
+                                        );
+                                        
+                                        if (!existingMatch) {
+                                            const currentSize = this.extractSizeFromName(productData.name);
+                                            results.availableFavorites.push({
+                                                product: {
+                                                    ...productData,
+                                                    id: productId,
+                                                    current_price: productData.price
+                                                },
+                                                favoriteName: favorite.name,
+                                                matchedTerms: favorite.terms.filter(term => 
+                                                    productData.name.toLowerCase().includes(term.toLowerCase())
+                                                ),
+                                                baseName: baseName,
+                                                availableSizes: [currentSize].filter(Boolean), // Only add if size is detected
+                                                sizeData: currentSize ? { [currentSize]: { price: productData.price, product: productData } } : {}
+                                            });
+                                        } else {
+                                            // Add the new size to the existing match
+                                            const currentSize = this.extractSizeFromName(productData.name);
+                                            const existingSize = this.extractSizeFromName(existingMatch.product.name);
+                                            
+                                            // Add current size to available sizes if not already there
+                                            if (currentSize && !existingMatch.availableSizes.includes(currentSize)) {
+                                                existingMatch.availableSizes.push(currentSize);
+                                                existingMatch.availableSizes.sort((a, b) => {
+                                                    // Sort 250g first, then 1kg
+                                                    if (a === '250g' && b === '1kg') return -1;
+                                                    if (a === '1kg' && b === '250g') return 1;
+                                                    return 0;
+                                                });
+                                            }
+                                            
+                                            // Store price data for this size
+                                            if (currentSize) {
+                                                if (!existingMatch.sizeData) {
+                                                    existingMatch.sizeData = {};
+                                                }
+                                                existingMatch.sizeData[currentSize] = {
+                                                    price: productData.price,
+                                                    product: productData
+                                                };
+                                            }
+                                            
+                                            // Update to better product version if applicable (for the main display product)
+                                            if (this.shouldReplaceProduct(existingMatch.product, productData, existingSize, currentSize)) {
+                                                existingMatch.product = {
+                                                    ...productData,
+                                                    id: productId,
+                                                    current_price: productData.price
+                                                };
+                                                existingMatch.matchedTerms = favorite.terms.filter(term => 
+                                                    productData.name.toLowerCase().includes(term.toLowerCase())
+                                                );
+                                            }
+                                            
+                                            this.log('debug', `Added size ${currentSize} to existing coffee ${baseName}`);
+                                        }
+                                    } else {
+                                        this.log('debug', `Skipping notification for ${productData.name} - already notified recently`);
                                     }
+                                } else {
+                                    this.log('debug', `Product ${productData.name} matches favorite ${favorite.name} but doesn't meet preferences`);
                                 }
                                 break; // Don't match the same product multiple times
                             }
@@ -243,16 +305,20 @@ class CoffeeMonitor {
 
     async sendNotifications(results) {
         try {
-            // Notify about available favorites
-            for (const favoriteData of results.availableFavorites) {
-                this.log('info', `Sending favorite notification for ${favoriteData.product.name}`);
+            // Group all available favorites into a single notification
+            if (results.availableFavorites.length > 0) {
+                this.log('info', `Sending grouped favorites notification for ${results.availableFavorites.length} products`);
                 
-                const notifications = await this.notifier.notify('favorite_available', favoriteData);
+                const notifications = await this.notifier.notify('favorites_available_grouped', {
+                    favorites: results.availableFavorites
+                });
                 
-                // Record that we sent notifications
-                await this.database.recordNotificationSent(favoriteData.product.id, 'favorite_available');
+                // Record that we sent notifications for each product
+                for (const favoriteData of results.availableFavorites) {
+                    await this.database.recordNotificationSent(favoriteData.product.id, 'favorite_available');
+                }
                 
-                this.log('info', 'Notifications sent', { notifications });
+                this.log('info', 'Grouped favorites notification sent', { notifications });
             }
 
             // Optionally notify about new products (if there are many, might want to batch)
@@ -371,6 +437,50 @@ class CoffeeMonitor {
             return '1kg';
         }
         return null; // Unknown size
+    }
+
+    isOrganicByName(productName) {
+        const name = productName.toLowerCase();
+        const organicKeywords = [
+            'økologisk',
+            'organic', 
+            'eco',
+            'biologisk',
+            'bio '
+        ];
+        
+        return organicKeywords.some(keyword => name.includes(keyword));
+    }
+
+    getBaseProductName(productName) {
+        // Remove size indicators and common suffixes to get the base product name
+        let baseName = productName
+            .replace(/\s*,\s*\d+kg.*$/i, '')  // Remove ", 1kg ..." and everything after
+            .replace(/\s*,\s*\d+g.*$/i, '')   // Remove ", 250g ..." and everything after
+            .replace(/\s+\d+kg\s+.*$/i, '')   // Remove " 1kg ..." and everything after
+            .replace(/\s+\d+g\s+.*$/i, '')    // Remove " 250g ..." and everything after
+            .replace(/\s*\d+kg$/i, '')        // Remove " 1kg" at end
+            .replace(/\s*\d+g$/i, '')         // Remove " 250g" at end
+            .trim();
+        
+        return baseName;
+    }
+
+    shouldReplaceProduct(existingProduct, newProduct, existingSize, newSize) {
+        // Prefer organic products
+        if (newProduct.organic && !existingProduct.organic) {
+            return true;
+        }
+        if (!newProduct.organic && existingProduct.organic) {
+            return false;
+        }
+        
+        // Prefer larger sizes if both are equally organic
+        if (newSize === '1kg' && existingSize === '250g') {
+            return true;
+        }
+        
+        return false;
     }
 
     async close() {

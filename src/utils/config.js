@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
 class Config {
     constructor(configPath = null) {
@@ -13,6 +14,7 @@ class Config {
             if (fs.existsSync(this.configPath)) {
                 const configData = fs.readFileSync(this.configPath, 'utf8');
                 this.config = JSON.parse(configData);
+                this.applyEnvironmentOverrides();
                 this.validate();
             } else {
                 throw new Error(`Config file not found at ${this.configPath}`);
@@ -53,6 +55,76 @@ class Config {
         }
 
         console.log('Configuration loaded and validated successfully');
+    }
+
+    applyEnvironmentOverrides() {
+        // Override email configuration with environment variables if they exist
+        if (process.env.EMAIL_HOST) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.email) this.config.notifications.email = {};
+            if (!this.config.notifications.email.smtp) this.config.notifications.email.smtp = {};
+            this.config.notifications.email.smtp.host = process.env.EMAIL_HOST;
+        }
+        
+        if (process.env.EMAIL_PORT) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.email) this.config.notifications.email = {};
+            if (!this.config.notifications.email.smtp) this.config.notifications.email.smtp = {};
+            this.config.notifications.email.smtp.port = parseInt(process.env.EMAIL_PORT);
+        }
+        
+        if (process.env.EMAIL_USER) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.email) this.config.notifications.email = {};
+            if (!this.config.notifications.email.smtp) this.config.notifications.email.smtp = {};
+            if (!this.config.notifications.email.smtp.auth) this.config.notifications.email.smtp.auth = {};
+            this.config.notifications.email.smtp.auth.user = process.env.EMAIL_USER;
+        }
+        
+        if (process.env.EMAIL_PASS) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.email) this.config.notifications.email = {};
+            if (!this.config.notifications.email.smtp) this.config.notifications.email.smtp = {};
+            if (!this.config.notifications.email.smtp.auth) this.config.notifications.email.smtp.auth = {};
+            this.config.notifications.email.smtp.auth.pass = process.env.EMAIL_PASS;
+        }
+        
+        if (process.env.EMAIL_FROM) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.email) this.config.notifications.email = {};
+            this.config.notifications.email.from = process.env.EMAIL_FROM;
+        }
+        
+        if (process.env.EMAIL_TO) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.email) this.config.notifications.email = {};
+            // Handle comma-separated email addresses
+            this.config.notifications.email.to = process.env.EMAIL_TO.split(',').map(email => email.trim());
+        }
+        
+        if (process.env.DATABASE_PATH) {
+            if (!this.config.database) this.config.database = {};
+            this.config.database.path = process.env.DATABASE_PATH;
+        }
+        
+        // Telegram configuration overrides
+        if (process.env.TELEGRAM_BOT_TOKEN) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.telegram) this.config.notifications.telegram = {};
+            this.config.notifications.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
+        }
+        
+        if (process.env.TELEGRAM_CHAT_ID) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.telegram) this.config.notifications.telegram = {};
+            this.config.notifications.telegram.chatId = process.env.TELEGRAM_CHAT_ID;
+        }
+        
+        if (process.env.TELEGRAM_ENABLED !== undefined) {
+            if (!this.config.notifications) this.config.notifications = {};
+            if (!this.config.notifications.telegram) this.config.notifications.telegram = {};
+            this.config.notifications.telegram.enabled = process.env.TELEGRAM_ENABLED === 'true';
+        }
     }
 
     get(path, defaultValue = null) {

@@ -414,9 +414,10 @@ class Notifier {
     }
 
     generateTelegramMessage(message, templateType) {
-        // Ensure message has a title, fallback to empty string if not
-        const title = message?.title || 'Coffee Monitor Notification';
-        let text = `${title}\n\n`;
+        // Start with empty text - don't duplicate the title
+        let text = '';
+        
+        // Debug logging removed
 
         switch (templateType) {
             case 'favorite':
@@ -433,33 +434,56 @@ class Notifier {
             case 'favorites_grouped':
                 // Validate that we have favorites array
                 if (!message.favorites || !Array.isArray(message.favorites) || message.favorites.length === 0) {
-                    text += `Hei! 🎉\n\n`;
-                    text += `Favorittkaffiar er tilgjengelege, men kunne ikkje laste detaljar.\n\n`;
-                    text += `🚀 Sjekk nettsida for meir informasjon!`;
+                    text = `Favorittkaffiar tilgjengelege!`;
                     break;
                 }
                 
-                text += `Hei! 🎉\n\n`;
-                text += `${message.favorites.length} av dine favorittkaffiar er no tilgjengelege:\n\n`;
+                text = `☕ ${message.favorites.length} favorittkaffiar tilgjengelege!\n\n`;
                 
                 message.favorites.forEach((favoriteData, index) => {
-                    // Validate favorite data structure
                     if (!favoriteData || !favoriteData.product) {
-                        text += `${index + 1}. ☕ Ukjent produkt\n\n`;
                         return;
                     }
                     
                     const product = favoriteData.product;
-                    const productName = product.name || 'Ukjent kaffi';
+                    const baseName = favoriteData.baseName || this.getBaseProductName(product.name);
                     
-                    text += `${index + 1}. ☕ *${productName}*\n`;
-                    if (product.current_price) text += `   💰 ${product.current_price} kr\n`;
-                    if (favoriteData.favoriteName) text += `   ⭐ Matches: ${favoriteData.favoriteName}\n`;
-                    if (product.url) text += `   🔗 [Vis produkt](${product.url})\n`;
+                    // Add organic indicator
+                    const organicIndicator = product.organic ? '🌱 ' : '';
+                    
+                    text += `${index + 1}. ${organicIndicator}${baseName}\n`;
+                    
+                    // Show available sizes with prices
+                    if (favoriteData.availableSizes && favoriteData.availableSizes.length > 0) {
+                        favoriteData.availableSizes.forEach(size => {
+                            const pricePerSize = this.getPriceForSize(favoriteData, size);
+                            if (pricePerSize) {
+                                const pricePer250g = this.calculatePricePer250g(pricePerSize, size);
+                                text += `   💰 ${size}: ${pricePerSize} kr`;
+                                if (pricePer250g) {
+                                    text += ` (${pricePer250g} kr/250g)`;
+                                }
+                                text += `\n`;
+                            }
+                        });
+                    } else {
+                        // Fallback to showing the single product price
+                        if (product.current_price) {
+                            const size = this.extractSizeFromName(product.name);
+                            const pricePer250g = this.calculatePricePer250g(product.current_price, size);
+                            text += `   💰 ${product.current_price} kr`;
+                            if (pricePer250g) {
+                                text += ` (${pricePer250g} kr/250g)`;
+                            }
+                            text += `\n`;
+                        }
+                    }
+                    
+                    if (favoriteData.favoriteName) text += `⭐ ${favoriteData.favoriteName}\n`;
                     text += `\n`;
                 });
                 
-                text += `🚀 Køyr og bestill før dei blir utsolgt!`;
+                text += `🚀 Sjekk nettsida!`;
                 break;
 
             case 'new_products':
@@ -488,6 +512,8 @@ class Notifier {
                 text += message.body || 'Coffee Monitor notification';
         }
 
+        // Debug logging removed
+        
         return text;
     }
 
@@ -500,11 +526,26 @@ class Notifier {
                 return;
             }
             
+            // Send the message to Telegram
+            
+            // Check message length (Telegram limit is 4096 characters)
+            if (text.length > 4096) {
+                console.warn(`Telegram message too long (${text.length} chars), truncating to 4000 chars`);
+                text = text.substring(0, 4000) + '...';
+            }
+            
+            // Only remove markdown formatting, keep Norwegian characters and emojis
+            text = text.replace(/\*/g, ''); // Remove markdown asterisks
+            text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // Convert markdown links to plain text
+            
             const data = JSON.stringify({
-                chat_id: this.config.telegram.chatId,
-                text: text,
-                parse_mode: 'Markdown'
+                chat_id: parseInt(this.config.telegram.chatId, 10),
+                text: text
             });
+            
+            // JSON data prepared for Telegram API
+            
+            // Data prepared for Telegram API
 
             const options = {
                 hostname: 'api.telegram.org',
@@ -512,8 +553,8 @@ class Notifier {
                 path: `/bot${this.config.telegram.botToken}/sendMessage`,
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': data.length
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Content-Length': Buffer.byteLength(data, 'utf8')
                 }
             };
 
@@ -547,6 +588,65 @@ class Notifier {
             req.write(data);
             req.end();
         });
+    }
+
+    getPriceForSize(favoriteData, targetSize) {
+        // Check if we have stored size data
+        if (favoriteData.sizeData && favoriteData.sizeData[targetSize]) {
+            return favoriteData.sizeData[targetSize].price;
+        }
+        
+        // Fallback: check if the main product matches the target size
+        const product = favoriteData.product;
+        const productSize = this.extractSizeFromName(product.name);
+        
+        if (productSize === targetSize) {
+            return product.current_price;
+        }
+        
+        return null;
+    }
+
+    extractSizeFromName(productName) {
+        if (!productName) return null;
+        const name = productName.toLowerCase();
+        if (name.includes('250g') || name.includes('250 g')) {
+            return '250g';
+        }
+        if (name.includes('1kg') || name.includes('1 kg') || name.includes('1000g')) {
+            return '1kg';
+        }
+        return null;
+    }
+
+    getBaseProductName(productName) {
+        // Remove size indicators and common suffixes to get the base product name
+        let baseName = productName
+            .replace(/\s*,\s*\d+kg.*$/i, '')  // Remove ", 1kg ..." and everything after
+            .replace(/\s*,\s*\d+g.*$/i, '')   // Remove ", 250g ..." and everything after
+            .replace(/\s+\d+kg\s+.*$/i, '')   // Remove " 1kg ..." and everything after
+            .replace(/\s+\d+g\s+.*$/i, '')    // Remove " 250g ..." and everything after
+            .replace(/\s*\d+kg$/i, '')        // Remove " 1kg" at end
+            .replace(/\s*\d+g$/i, '')         // Remove " 250g" at end
+            .trim();
+        
+        return baseName;
+    }
+
+    calculatePricePer250g(price, size) {
+        if (!price || !size) return null;
+        
+        let grams;
+        if (size === '250g') {
+            grams = 250;
+        } else if (size === '1kg') {
+            grams = 1000;
+        } else {
+            return null;
+        }
+        
+        const pricePer250g = (price / grams) * 250;
+        return Math.round(pricePer250g); // Round to nearest kr
     }
 
     async close() {
