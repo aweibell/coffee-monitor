@@ -30,19 +30,20 @@ class Config {
             throw new Error('Config is empty');
         }
 
-        // Required fields validation
-        const required = {
-            'roastery.baseUrl': this.config.roastery?.baseUrl,
-        };
-
-        // Support both old shopUrl and new shopUrls format
-        if (!this.config.roastery?.shopUrl && !this.config.roastery?.shopUrls) {
-            throw new Error('Required config field missing: roastery.shopUrl or roastery.shopUrls');
+        // Validate multi-roastery format
+        if (!this.config.roasteries || !Array.isArray(this.config.roasteries) || this.config.roasteries.length === 0) {
+            throw new Error('roasteries must be a non-empty array');
         }
 
-        for (const [field, value] of Object.entries(required)) {
-            if (!value) {
-                throw new Error(`Required config field missing: ${field}`);
+        for (const [index, roastery] of this.config.roasteries.entries()) {
+            if (!roastery.baseUrl) {
+                throw new Error(`roasteries[${index}].baseUrl is required`);
+            }
+            if (!roastery.name) {
+                throw new Error(`roasteries[${index}].name is required`);
+            }
+            if (!roastery.shopUrls || !Array.isArray(roastery.shopUrls) || roastery.shopUrls.length === 0) {
+                throw new Error(`roasteries[${index}].shopUrls must be a non-empty array`);
             }
         }
 
@@ -172,29 +173,30 @@ class Config {
         }
     }
 
-    getRoasteryConfig() {
-        return this.config.roastery;
+    getRoasteries() {
+        return this.config.roasteries || [];
     }
 
-    getShopUrls() {
-        // Support new shopUrls format
-        if (this.config.roastery?.shopUrls) {
-            return this.config.roastery.shopUrls;
+    getAllShopUrls() {
+        // Get all URLs from all roasteries with roastery info
+        const roasteries = this.getRoasteries();
+        const allUrls = [];
+        
+        for (const roastery of roasteries) {
+            // Add roastery info to each URL
+            for (const urlConfig of roastery.shopUrls) {
+                allUrls.push({
+                    ...urlConfig,
+                    roastery: {
+                        name: roastery.name,
+                        baseUrl: roastery.baseUrl,
+                        selectors: roastery.selectors || {}
+                    }
+                });
+            }
         }
         
-        // Backward compatibility with old shopUrl format
-        if (this.config.roastery?.shopUrl) {
-            return [{
-                url: this.config.roastery.shopUrl,
-                metadata: {
-                    organic: true, // Assume organic for backward compatibility
-                    category: "all_sizes",
-                    description: "Legacy single URL"
-                }
-            }];
-        }
-        
-        return [];
+        return allUrls;
     }
 
     getNotificationConfig() {

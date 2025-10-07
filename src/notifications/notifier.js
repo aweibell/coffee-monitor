@@ -58,7 +58,7 @@ class Notifier {
 
         const message = {
             title: `☕ Favorittkaffi tilgjengeleg!`,
-            body: `${product.name} (${product.current_price} kr) er no tilgjengeleg hjå ${this.config.roastery?.name || 'eit kaffibrenneri'}!`,
+            body: `${product.name} (${product.current_price} kr) er no tilgjengeleg hjå ${product.roastery_name || 'eit kaffibrenneri'}!`,
             product: product,
             favoriteName: data.favoriteName,
             matchedTerms: data.matchedTerms
@@ -109,9 +109,13 @@ class Notifier {
 
         if (favorites.length === 0) return notifications;
 
+        // Get unique roastery names
+        const roasteryNames = [...new Set(favorites.map(f => f.product.roastery_name).filter(Boolean))];
+        const roasteryText = roasteryNames.length > 0 ? roasteryNames.join(', ') : 'ulike kaffibrenneri';
+        
         const message = {
             title: `☕ ${favorites.length} Favorittkaffiar tilgjengelege!`,
-            body: `${favorites.length} av dine favorittkaffiar er no tilgjengelege hjå ${this.config.roastery?.name || 'eit kaffibrenneri'}!`,
+            body: `${favorites.length} av dine favorittkaffiar er no tilgjengelege hjå ${roasteryText}!`,
             favorites: favorites
         };
 
@@ -160,9 +164,13 @@ class Notifier {
 
         if (products.length === 0) return notifications;
 
+        // Get unique roastery names 
+        const roasteryNames = [...new Set(products.map(p => p.roastery_name).filter(Boolean))];
+        const roasteryText = roasteryNames.length > 0 ? roasteryNames.join(', ') : 'ulike kaffibrenneri';
+        
         const message = {
             title: `☕ Nye produkt tilgjengelege!`,
-            body: `${products.length} nye kaffiprodukt er tilgjengelege hjå ${this.config.roastery?.name || 'eit kaffibrenneri'}`,
+            body: `${products.length} nye kaffiprodukt er tilgjengelege hjå ${roasteryText}`,
             products: products
         };
 
@@ -425,6 +433,7 @@ class Notifier {
                 text += `Hei! 🎉\n\n`;
                 text += `Ein av dine favorittkaffiar er no tilgjengeleg:\n\n`;
                 text += `☕ *${product.name}*\n`;
+                if (product.roastery_name) text += `🏪 ${product.roastery_name}\n`;
                 if (product.current_price) text += `💰 Pris: ${product.current_price} kr\n`;
                 if (product.description) text += `📝 ${product.description}\n`;
                 if (product.url) text += `🔗 [Vis produkt](${product.url})\n`;
@@ -452,6 +461,7 @@ class Notifier {
                     const organicIndicator = product.organic ? '🌱 ' : '';
                     
                     text += `${index + 1}. ${organicIndicator}${baseName}\n`;
+                    if (product.roastery_name) text += `   🏪 ${product.roastery_name}\n`;
                     
                     // Show available sizes with prices
                     if (favoriteData.availableSizes && favoriteData.availableSizes.length > 0) {
@@ -492,6 +502,7 @@ class Notifier {
                 
                 message.products.slice(0, 10).forEach((product, index) => {
                     text += `${index + 1}. *${product.name}*\n`;
+                    if (product.roastery_name) text += `   🏪 ${product.roastery_name}\n`;
                     if (product.current_price) text += `   💰 ${product.current_price} kr\n`;
                     if (product.url) text += `   🔗 [Vis produkt](${product.url})\n`;
                     text += `\n`;

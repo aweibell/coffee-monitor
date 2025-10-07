@@ -29,6 +29,7 @@ class Database {
     async initialize() {
         await this.connect();
         await this.createTables();
+        await this.runMigrations();
     }
 
     async createTables() {
@@ -43,9 +44,14 @@ class Database {
                 size_category TEXT,
                 source_url TEXT,
                 source_description TEXT,
+                roastery_name TEXT,
+                deep_scanned BOOLEAN DEFAULT 0,
+                full_description TEXT,
+                processing_method TEXT,
+                sustainability_info TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(name)
+                UNIQUE(name, roastery_name)
             )`,
             `CREATE TABLE IF NOT EXISTS availability_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +92,27 @@ class Database {
         }
     }
 
+    async runMigrations() {
+        // Get current columns in products table
+        const tableInfo = await this.all("PRAGMA table_info(products)");
+        const existingColumns = new Set(tableInfo.map(col => col.name));
+        
+        // Check and add missing columns
+        const requiredColumns = {
+            'deep_scanned': 'BOOLEAN DEFAULT 0',
+            'full_description': 'TEXT',
+            'processing_method': 'TEXT',
+            'sustainability_info': 'TEXT'
+        };
+        
+        for (const [columnName, columnDef] of Object.entries(requiredColumns)) {
+            if (!existingColumns.has(columnName)) {
+                console.log(`Adding missing column: ${columnName}`);
+                await this.run(`ALTER TABLE products ADD COLUMN ${columnName} ${columnDef}`);
+            }
+        }
+    }
+
     async run(query, params = []) {
         return new Promise((resolve, reject) => {
             this.db.run(query, params, function(err) {
@@ -123,23 +150,23 @@ class Database {
     }
 
     async saveProduct(productData) {
-        const { name, url, price, description, organic, size_category, source_url, source_description } = productData;
+        const { name, url, price, description, organic, size_category, source_url, source_description, roastery_name } = productData;
         
-        // Check if product exists
-        const existing = await this.get('SELECT id FROM products WHERE name = ?', [name]);
+        // Check if product exists (now includes roastery_name in uniqueness check)
+        const existing = await this.get('SELECT id FROM products WHERE name = ? AND roastery_name = ?', [name, roastery_name]);
         
         if (existing) {
             // Update existing product
             await this.run(
-                'UPDATE products SET url = ?, price = ?, description = ?, organic = ?, size_category = ?, source_url = ?, source_description = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?',
-                [url, price, description, organic, size_category, source_url, source_description, name]
+                'UPDATE products SET url = ?, price = ?, description = ?, organic = ?, size_category = ?, source_url = ?, source_description = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ? AND roastery_name = ?',
+                [url, price, description, organic, size_category, source_url, source_description, name, roastery_name]
             );
             return existing.id;
         } else {
             // Insert new product
             const result = await this.run(
-                'INSERT INTO products (name, url, price, description, organic, size_category, source_url, source_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [name, url, price, description, organic, size_category, source_url, source_description]
+                'INSERT INTO products (name, url, price, description, organic, size_category, source_url, source_description, roastery_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [name, url, price, description, organic, size_category, source_url, source_description, roastery_name]
             );
             return result.id;
         }

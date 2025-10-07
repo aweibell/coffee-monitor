@@ -2,8 +2,8 @@ const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
 
 class CoffeeScraper {
-    constructor(config) {
-        this.config = config;
+    constructor(roasteryConfig = null) {
+        this.roasteryConfig = roasteryConfig;
         this.browser = null;
         this.page = null;
     }
@@ -22,11 +22,14 @@ class CoffeeScraper {
         await this.page.setViewport({ width: 1280, height: 800 });
     }
 
-    async scrapeProducts(url) {
+    async scrapeProducts(url, roasteryConfig = null) {
         if (!this.page) {
             throw new Error('Scraper not initialized. Call init() first.');
         }
 
+        // Use provided roastery config or fallback to instance config
+        const config = roasteryConfig || this.roasteryConfig;
+        
         try {
             console.log(`Navigating to ${url}...`);
             await this.page.goto(url, { 
@@ -42,11 +45,11 @@ class CoffeeScraper {
 
             const products = [];
 
-            // Generic product parsing - this will need to be customized per roastery
-            const productElements = this.getProductElements($);
+            // Use roastery-specific selectors for parsing
+            const productElements = this.getProductElements($, config);
 
             productElements.each((index, element) => {
-                const product = this.parseProductElement($, element);
+                const product = this.parseProductElement($, element, config);
                 if (product && product.name) {
                     products.push(product);
                 }
@@ -61,18 +64,30 @@ class CoffeeScraper {
         }
     }
 
-    getProductElements($) {
-        // Default selectors - override in config or subclass
-        const selectors = this.config.selectors || {
-            productContainer: '.product-item, .product-card, .product, article[class*="product"]',
-        };
-
+    getProductElements($, config) {
+        const selectors = this.getSelectors(config);
         return $(selectors.productContainer);
     }
 
-    parseProductElement($, element) {
+    getSelectors(config) {
+        // If config specifies selectors, use those
+        if (config?.selectors) {
+            return config.selectors;
+        }
+
+        // Fallback selectors that try common patterns
+        return {
+            productContainer: '.product, .product-item, .product-card, article[class*="product"], .woocommerce-product, .grid__item',
+            name: '.product-title, .product-name, .woocommerce-loop-product__title, .product-item__title, h2, h3, .title',
+            price: '.price, .product-price, .woocommerce-Price-amount, .product-item__price, .money, .cost',
+            link: 'a',
+            availability: '.stock, .availability, .product-form__buttons'
+        };
+    }
+
+    parseProductElement($, element, config) {
         const $el = $(element);
-        const selectors = this.config.selectors || {};
+        const selectors = config?.selectors || {};
 
         try {
             // Extract product information using configurable selectors
@@ -98,7 +113,7 @@ class CoffeeScraper {
                 selectors.link,
                 'a',
                 '[href]'
-            ].filter(Boolean));
+            ].filter(Boolean), config);
 
             const available = this.extractAvailability($, $el, selectors.availability);
 
@@ -146,7 +161,7 @@ class CoffeeScraper {
         return null;
     }
 
-    extractUrl($, $el, selectors) {
+    extractUrl($, $el, selectors, config) {
         for (const selector of selectors) {
             const element = $el.find(selector).first();
             if (element.length > 0) {
@@ -154,7 +169,7 @@ class CoffeeScraper {
                 if (href) {
                     // Convert relative URLs to absolute
                     if (href.startsWith('/')) {
-                        const baseUrl = new URL(this.config.baseUrl || this.page.url());
+                        const baseUrl = new URL(config?.baseUrl || this.page.url());
                         return new URL(href, baseUrl).href;
                     }
                     return href;

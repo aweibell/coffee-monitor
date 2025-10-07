@@ -4,6 +4,7 @@ const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const CoffeeMonitor = require('./monitor');
 const Config = require('./utils/config');
+const RoasteryDiscovery = require('./discovery/roastery-discovery');
 const path = require('path');
 const fs = require('fs');
 
@@ -13,7 +14,23 @@ const argv = yargs(hideBin(process.argv))
         description: 'Path to config file',
         type: 'string'
     })
-    .command('check', 'Run a one-time product check', {}, async (argv) => {
+    .example('node src/index.js discover -u "https://example-roastery.no"', 'Analyze roastery and ask to add to config')
+    .example('node src/index.js check', 'Run a one-time product check across configured roasteries')
+    .example('node src/index.js check --deep-scan', 'Check products and deep scan new ones for detailed info')
+    .example('node src/index.js check --deep-scan --force-all', 'Deep scan all products (slower, more detailed)')
+    .example('node src/index.js favorites --list', 'List all configured favorites')
+    .command('check', 'Run a one-time product check', {
+        'deep-scan': {
+            description: 'Fetch detailed information from individual product pages',
+            type: 'boolean',
+            default: false
+        },
+        'force-all': {
+            description: 'Force deep scan all products (when used with --deep-scan)',
+            type: 'boolean', 
+            default: false
+        }
+    }, async (argv) => {
         await runCheck(argv);
     })
     .command('start', 'Start scheduled monitoring', {}, async (argv) => {
@@ -74,6 +91,22 @@ const argv = yargs(hideBin(process.argv))
     .command('setup', 'Setup configuration file', {}, async (argv) => {
         await setupConfig(argv);
     })
+    .command('discover', 'Auto-discover roastery configuration from URL', {
+        'url': {
+            alias: 'u',
+            description: 'Base URL of the roastery website',
+            type: 'string',
+            demandOption: true
+        },
+        'test': {
+            alias: 't',
+            description: 'Test the discovered configuration',
+            type: 'boolean',
+            default: true
+        }
+    }, async (argv) => {
+        await discoverRoastery(argv);
+    })
     .help()
     .alias('help', 'h')
     .demandCommand(1, 'You need to specify a command')
@@ -86,7 +119,13 @@ async function runCheck(argv) {
         console.log('🔍 Starting one-time product check...');
         monitor = new CoffeeMonitor(argv.config);
         await monitor.initialize();
-        await monitor.checkProducts();
+        
+        const options = {
+            deepScan: argv['deep-scan'],
+            forceAll: argv['force-all']
+        };
+        
+        await monitor.checkProducts(options);
         console.log('✅ Check completed successfully');
     } catch (error) {
         console.error('❌ Check failed:', error.message);
@@ -338,9 +377,12 @@ async function setupConfig(argv) {
         if (Config.createFromExample(configPath, examplePath)) {
             console.log('✅ Configuration file created successfully!');
             console.log(`📝 Edit ${configPath} with your settings:`);
-            console.log('   • Set your roastery URL and selectors');
+            console.log('   • Add roasteries (URLs + selectors) or use auto-discovery');
             console.log('   • Configure email settings if you want notifications');
             console.log('   • Add your favorite product patterns');
+            console.log('');
+            console.log('You can auto-discover and add a roastery with:');
+            console.log('   node src/index.js discover -u "https://example-roastery.no"');
             console.log('');
             console.log('After editing the config, run:');
             console.log('   npm run check    # Test the configuration');
@@ -353,6 +395,196 @@ async function setupConfig(argv) {
     } catch (error) {
         console.error('❌ Setup failed:', error.message);
         process.exit(1);
+    }
+}
+
+async function discoverRoastery(argv) {
+    const discovery = new RoasteryDiscovery();
+    
+    try {
+        console.log('🤖 Auto-discovering roastery configuration...');
+        console.log(`🌐 Analyzing: ${argv.url}`);
+        console.log('');
+        
+        const results = await discovery.discoverRoastery(argv.url);
+        
+        // Display results
+        console.log('📋 Discovery Results:');
+        console.log('=' .repeat(50));
+        console.log(`🏪 Name: ${results.name}`);
+        console.log(`🌍 Base URL: ${results.baseUrl}`);
+        console.log(`🛠️  Platform(s): ${results.platforms.join(', ')}`);
+        console.log(`🎯 Confidence: ${results.confidence.toUpperCase()}`);
+        console.log('');
+        
+        if (results.shopUrls.length > 0) {
+            console.log('🛒 Discovered Shop URLs:');
+            results.shopUrls.forEach((shop, index) => {
+                console.log(`   ${index + 1}. ${shop.url}`);
+            });
+            console.log('');
+        }
+        
+        console.log('🔍 Generated Selectors:');
+        Object.entries(results.selectors).forEach(([key, value]) => {
+            if (value) {
+                console.log(`   ${key}: ${value}`);
+            }
+        });
+        console.log('');
+        
+        if (results.testResults && results.testResults.length > 0) {
+            console.log('✨ Sample Products Found:');
+            results.testResults.forEach((product, index) => {
+                console.log(`   ${index + 1}. ${product.name} ${product.price ? `(${product.price} kr)` : ''}`);
+            });
+            console.log('');
+        }
+        
+        // Generate config JSON
+        const roasteryConfig = {
+            name: results.name,
+            baseUrl: results.baseUrl,
+            shopUrls: results.shopUrls,
+            selectors: results.selectors
+        };
+        
+        console.log('📄 Generated Configuration:');
+        console.log(JSON.stringify(roasteryConfig, null, 2));
+        console.log('');
+        
+        // Always ask for confirmation to add/update roastery
+        const existingRoastery = await checkForExistingRoastery(roasteryConfig, argv.config);
+        
+        let promptMessage;
+        if (existingRoastery) {
+            promptMessage = `Update existing "${existingRoastery.name}" with new discovery results (${results.shopUrls.length} shop URL(s))?`;
+        } else {
+            promptMessage = `Add "${results.name}" to your config with ${results.shopUrls.length} shop URL(s)?`;
+        }
+        
+        const shouldAdd = await promptConfirmation(promptMessage, results.confidence, existingRoastery);
+        
+        if (shouldAdd) {
+            await addRoasteryToConfig(roasteryConfig, argv.config);
+        } else {
+            console.log('🚫 Roastery not added.');
+            console.log('💡 You can still copy the JSON above and add it manually to config.json');
+        }
+        
+    } catch (error) {
+        console.error('❌ Discovery failed:', error.message);
+        process.exit(1);
+    } finally {
+        await discovery.close();
+    }
+}
+
+async function checkForExistingRoastery(roasteryConfig, configPath) {
+    try {
+        const actualConfigPath = configPath || path.join(__dirname, '../config/config.json');
+        
+        if (!fs.existsSync(actualConfigPath)) {
+            return null;
+        }
+        
+        const configData = fs.readFileSync(actualConfigPath, 'utf8');
+        const config = JSON.parse(configData);
+        
+        if (!config.roasteries) {
+            return null;
+        }
+        
+        // Check if roastery already exists
+        return config.roasteries.find(r => 
+            r.name === roasteryConfig.name || r.baseUrl === roasteryConfig.baseUrl
+        ) || null;
+        
+    } catch (error) {
+        console.error('⚠️  Error checking for existing roastery:', error.message);
+        return null;
+    }
+}
+
+async function promptConfirmation(message, confidence, existingRoastery = null) {
+    const readline = require('readline');
+    
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    return new Promise((resolve) => {
+        // Add context based on confidence level
+        let contextMessage = '';
+        switch(confidence) {
+            case 'high':
+                contextMessage = '🚀 High confidence - selectors tested successfully!';
+                break;
+            case 'medium':
+                contextMessage = '🟡 Medium confidence - some products found, may need tweaking.';
+                break;
+            case 'low':
+                contextMessage = '🔴 Low confidence - no products found, selectors may need manual adjustment.';
+                break;
+        }
+        
+        console.log('');
+        console.log(contextMessage);
+        
+        // Show additional context if updating existing roastery
+        if (existingRoastery) {
+            console.log('🔄 This will replace the existing configuration:');
+            console.log(`   Current URLs: ${existingRoastery.shopUrls?.length || 0}`);
+            console.log(`   Current selectors: ${Object.keys(existingRoastery.selectors || {}).length}`);
+        }
+        
+        console.log('');
+        
+        rl.question(`${message} [y/N]: `, (answer) => {
+            rl.close();
+            const normalized = answer.toLowerCase().trim();
+            resolve(normalized === 'y' || normalized === 'yes');
+        });
+    });
+}
+
+async function addRoasteryToConfig(roasteryConfig, configPath) {
+    try {
+        const actualConfigPath = configPath || path.join(__dirname, '../config/config.json');
+        
+        if (!fs.existsSync(actualConfigPath)) {
+            console.error('❌ Config file not found. Run setup first.');
+            return;
+        }
+        
+        const configData = fs.readFileSync(actualConfigPath, 'utf8');
+        const config = JSON.parse(configData);
+        
+        if (!config.roasteries) {
+            config.roasteries = [];
+        }
+        
+        // Check if roastery already exists
+        const existingIndex = config.roasteries.findIndex(r => 
+            r.name === roasteryConfig.name || r.baseUrl === roasteryConfig.baseUrl
+        );
+        
+        if (existingIndex >= 0) {
+            console.log('⚠️  Roastery already exists in config. Updating...');
+            config.roasteries[existingIndex] = roasteryConfig;
+        } else {
+            console.log('➕ Adding roastery to config...');
+            config.roasteries.push(roasteryConfig);
+        }
+        
+        fs.writeFileSync(actualConfigPath, JSON.stringify(config, null, 2));
+        console.log('✅ Roastery added to configuration!');
+        console.log('🧪 Run a test check:');
+        console.log('   node src/index.js check');
+        
+    } catch (error) {
+        console.error('❌ Failed to add roastery to config:', error.message);
     }
 }
 

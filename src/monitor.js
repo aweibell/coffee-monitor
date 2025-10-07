@@ -10,7 +10,7 @@ class CoffeeMonitor {
     constructor(configPath = null) {
         this.config = new Config(configPath);
         this.database = new Database(path.resolve(this.config.getDatabaseConfig().path));
-        this.scraper = new CoffeeScraper(this.config.getRoasteryConfig());
+        this.scraper = new CoffeeScraper(); // Initialize without roastery config
         this.notifier = new Notifier(this.config.getNotificationConfig());
         this.scheduledJob = null;
         this.isRunning = false;
@@ -75,7 +75,7 @@ class CoffeeMonitor {
         }
     }
 
-    async checkProducts() {
+    async checkProducts(options = {}) {
         if (this.isRunning) {
             this.log('warn', 'Check already in progress, skipping...');
             return;
@@ -83,41 +83,44 @@ class CoffeeMonitor {
 
         this.isRunning = true;
         const startTime = new Date();
-        this.log('info', 'Starting product check...');
+        this.log('info', `Starting product check${options.deepScan ? ' with deep scanning' : ''}...`);
 
         try {
-            const shopUrls = this.config.getShopUrls();
+            const allShopUrls = this.config.getAllShopUrls();
             
             // Initialize scraper
             await this.scraper.init();
             
             let allScrapedProducts = [];
             
-            // Scrape each URL
-            for (const urlConfig of shopUrls) {
-                this.log('info', `Scraping products from ${urlConfig.url} (${urlConfig.metadata.description})`);
+            // Scrape each URL from all roasteries
+            for (const urlConfig of allShopUrls) {
+                this.log('info', `Scraping products from ${urlConfig.roastery.name}: ${urlConfig.url} (${urlConfig.metadata.description})`);
                 
-                const scrapedProducts = await this.scraper.scrapeProducts(urlConfig.url);
+                const scrapedProducts = await this.scraper.scrapeProducts(urlConfig.url, urlConfig.roastery);
                 
-                // Add metadata to each product
-                const productsWithMetadata = scrapedProducts.map(product => {
-                    // Detect organic products based on name content, even if URL isn't marked as organic
-                    const nameBasedOrganic = this.isOrganicByName(product.name);
-                    
-                    return {
-                        ...product,
-                        organic: urlConfig.metadata.organic || nameBasedOrganic,
-                        size_category: urlConfig.metadata.category,
-                        source_url: urlConfig.url,
-                        source_description: urlConfig.metadata.description
-                    };
-                });
+                // Filter out non-coffee products and add metadata
+                const productsWithMetadata = scrapedProducts
+                    .filter(product => this.isCoffeeProduct(product))
+                    .map(product => {
+                        // Detect organic products based on name content, even if URL isn’t marked as organic
+                        const nameBasedOrganic = this.isOrganicByName(product.name);
+                        
+                        return {
+                            ...product,
+                            organic: urlConfig.metadata.organic || nameBasedOrganic,
+                            size_category: urlConfig.metadata.category,
+                            source_url: urlConfig.url,
+                            source_description: urlConfig.metadata.description,
+                            roastery_name: urlConfig.roastery.name
+                        };
+                    });
                 
                 allScrapedProducts = allScrapedProducts.concat(productsWithMetadata);
-                this.log('info', `Found ${scrapedProducts.length} products from ${urlConfig.metadata.description}`);
+                this.log('info', `Found ${scrapedProducts.length} products from ${urlConfig.roastery.name}: ${urlConfig.metadata.description}`);
             }
             
-            this.log('info', `Found ${allScrapedProducts.length} total products from ${shopUrls.length} sources`);
+            this.log('info', `Found ${allScrapedProducts.length} total products from ${allShopUrls.length} sources across multiple roasteries`);
 
             if (allScrapedProducts.length === 0) {
                 this.log('warn', 'No products found - might be a scraping issue');
@@ -267,6 +270,11 @@ class CoffeeMonitor {
                 } catch (error) {
                     this.log('error', `Error processing product ${productData.name}`, { error: error.message });
                 }
+            }
+
+            // Deep scan products if requested
+            if (options.deepScan) {
+                await this.performDeepScan(allScrapedProducts, options.forceAll);
             }
 
             // Send notifications
@@ -450,6 +458,288 @@ class CoffeeMonitor {
         ];
         
         return organicKeywords.some(keyword => name.includes(keyword));
+    }
+
+    isCoffeeProduct(product) {
+        if (!product.name) return false;
+        
+        const name = product.name.toLowerCase();
+        
+        // Common non-coffee items to exclude
+        const excludeKeywords = [
+            'maskin',          // Coffee machines
+            'kvern',           // Grinders  
+            'presskanne',      // French press
+            'filter',          // Filters
+            'mugge',           // Mugs
+            'kopp',            // Cups
+            'pumpe',           // Pumps
+            'abonnement',      // Subscriptions
+            'subscription',    
+            'utstyr',          // Equipment
+            'equipment',
+            'bryggeutstyr',    // Brewing equipment
+            'cleaning',        // Cleaning products
+            'rens',            // Cleaning
+            'te ',             // Tea (with space to avoid "latte")
+            'tea',
+            'gave',            // Gifts
+            'gift',
+            'tilbehør',        // Accessories
+            'accessories',
+            'scale',           // Scales
+            'vekt',
+            'termometer',      // Thermometer
+            'bialetti'         // Brand that makes equipment
+        ];
+        
+        // If product name contains any exclude keywords, it's not coffee
+        const isExcluded = excludeKeywords.some(keyword => name.includes(keyword));
+        if (isExcluded) {
+            return false;
+        }
+        
+        // Coffee-specific keywords (if none of these, likely not coffee)
+        const coffeeKeywords = [
+            'kaffe',
+            'coffee', 
+            'espresso',
+            'arabica',
+            'robusta',
+            'blend',
+            'blanding',
+            'bønner',
+            'beans',
+            'malt',
+            'ground',
+            'hele bønner',
+            'whole beans',
+            // Origin names
+            'etiopia',
+            'ethiopia', 
+            'kenya',
+            'colombia',
+            'brazil',
+            'brasil',
+            'peru',
+            'guatemala',
+            'honduras',
+            'sumatra',
+            'java',
+            'mocha',
+            'mocca',
+            'yemen',
+            'jamaica',
+            'costa rica',
+            'nicaragua',
+            'el salvador',
+            'panama',
+            'ecuador',
+            'bolivia',
+            'rwanda',
+            'burundi',
+            'uganda',
+            'tanzania',
+            'malawi',
+            'india',
+            'malabar',
+            // Norwegian processing terms
+            'bærtørket',
+            'vasket',
+            'våtbehandlet',
+            'tørrbehandlet',
+            'pulped natural',
+            'semi-washed',
+            'honey process',
+            'honning',
+            'fermentert',
+            'anaerob',
+            // English processing terms
+            'natural',
+            'washed',
+            'honey',
+            'carbonic maceration',
+            'anaerobic',
+            'fermented',
+            // Norwegian roast levels and descriptions
+            'lys',
+            'lysristet',
+            'medium',
+            'middels',
+            'mørk',
+            'mørkristet',
+            'dark',
+            'light',
+            'lysbrent',
+            'mørkbrent',
+            'franskbrent',
+            'italienskbrent',
+            'filterbrent',
+            'espressobrent',
+            // Norwegian coffee descriptors
+            'single origin',
+            'enkeltgård',
+            'mikrolot',
+            'spesialkaffe',
+            'speciality',
+            'specialty',
+            'fruktete',
+            'nøttete',
+            'sjokoladete',
+            'blomsterete',
+            'sitruspreget',
+            'bær',
+            'koffeinfri',
+            'decaf',
+            'fairtrade',
+            'rettferdig handel',
+            // Farm/region specific terms
+            'finca',
+            'hacienda',
+            'fazenda',
+            'cooperative',
+            'kooperativ',
+            'kollektiv',
+            'småbonde',
+            'plantation'
+        ];
+        
+        const hasCoffeeKeyword = coffeeKeywords.some(keyword => name.includes(keyword));
+        
+        // Additional check: if price is very high (>2000 kr), likely equipment
+        if (product.price && product.price > 2000) {
+            return false;
+        }
+        
+        return hasCoffeeKeyword;
+    }
+
+    async performDeepScan(products, forceAll = false) {
+        this.log('info', `Starting deep scan of ${products.length} products${forceAll ? ' (forcing all)' : ' (new only)'}...`);
+        
+        let scannedCount = 0;
+        let skippedCount = 0;
+        
+        for (const product of products) {
+            if (!product.url) {
+                skippedCount++;
+                continue; // No product URL to scan
+            }
+            
+            // Check if already deep scanned (unless forcing all)
+            if (!forceAll) {
+                const existingProduct = await this.database.get(
+                    'SELECT deep_scanned FROM products WHERE name = ? AND roastery_name = ?',
+                    [product.name, product.roastery_name]
+                );
+                
+                if (existingProduct?.deep_scanned) {
+                    skippedCount++;
+                    continue; // Already scanned
+                }
+            }
+            
+            try {
+                this.log('info', `Deep scanning: ${product.name}`);
+                
+                // Navigate to product page and extract details
+                await this.scraper.page.goto(product.url, { 
+                    waitUntil: 'networkidle2',
+                    timeout: 30000 
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Be respectful
+                
+                const content = await this.scraper.page.content();
+                const $ = require('cheerio').load(content);
+                
+                // Extract detailed information
+                const fullDescription = this.extractFullDescription($);
+                const processingMethod = this.extractProcessingMethod($, fullDescription);
+                const sustainabilityInfo = this.extractSustainabilityInfo($, fullDescription);
+                
+                // Update database with deep scan results
+                await this.database.run(
+                    'UPDATE products SET deep_scanned = 1, full_description = ?, processing_method = ?, sustainability_info = ? WHERE name = ? AND roastery_name = ?',
+                    [fullDescription, processingMethod, sustainabilityInfo, product.name, product.roastery_name]
+                );
+                
+                scannedCount++;
+                
+                // Rate limiting - be respectful to the websites
+                if (scannedCount % 5 === 0) {
+                    this.log('info', `Deep scanned ${scannedCount} products, pausing briefly...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+                
+            } catch (error) {
+                this.log('error', `Failed to deep scan ${product.name}`, { error: error.message });
+            }
+        }
+        
+        this.log('info', `Deep scan completed: ${scannedCount} scanned, ${skippedCount} skipped`);
+    }
+    
+    extractFullDescription($) {
+        // Try multiple selectors for full product description
+        const selectors = [
+            '.product-description',
+            '.product-content', 
+            '.product-details',
+            '.entry-content',
+            '.woocommerce-tabs',
+            '.product-info',
+            '[class*="description"]',
+            '[class*="content"]'
+        ];
+        
+        for (const selector of selectors) {
+            const element = $(selector);
+            if (element.length > 0) {
+                return element.text().trim();
+            }
+        }
+        
+        // Fallback to body text if specific selectors not found
+        return $('body').text().trim().substring(0, 2000); // Limit to reasonable length
+    }
+    
+    extractProcessingMethod($, fullText) {
+        const text = (fullText || '').toLowerCase();
+        
+        const processingMethods = [
+            'bærtørket', 'natural', 'naturell',
+            'vasket', 'washed', 'våtbehandlet',
+            'tørrbehandlet', 'dry process',
+            'honey', 'honning', 'honey process',
+            'anaerob', 'anaerobic',
+            'fermentert', 'fermented',
+            'carbonic maceration'
+        ];
+        
+        for (const method of processingMethods) {
+            if (text.includes(method)) {
+                return method;
+            }
+        }
+        
+        return null;
+    }
+    
+    extractSustainabilityInfo($, fullText) {
+        const text = (fullText || '').toLowerCase();
+        const sustainabilityKeywords = [
+            'bærekraft', 'sustainability', 'sustainable',
+            'fairtrade', 'fair trade', 'rettferdig handel',
+            'økologisk', 'organic', 'biologisk',
+            'rainforest alliance', 'bird friendly',
+            'direct trade', 'direkte handel',
+            'småbonde', 'smallholder'
+        ];
+        
+        const foundKeywords = sustainabilityKeywords.filter(keyword => text.includes(keyword));
+        
+        return foundKeywords.length > 0 ? foundKeywords.join(', ') : null;
     }
 
     getBaseProductName(productName) {
