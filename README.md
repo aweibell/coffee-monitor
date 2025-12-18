@@ -6,6 +6,7 @@ A web scraping service that monitors your local coffee roastery's website for pr
 
 - 🔍 **Web Scraping**: Automatically scrape coffee roastery websites for product information
 - ⭐ **Favorites Tracking**: Define favorite coffee patterns (e.g., "Ethiopia", "Natural Process") 
+- 🤖 **AI Product Tagging**: Automatically extract origin, process method, certifications, and more using OpenAI
 - 📧 **Email Notifications**: Get notified when favorite coffees become available
 - 🖥️ **Desktop Notifications**: Native desktop notifications on Linux
 - 📊 **Availability Tracking**: Historical tracking of product availability
@@ -81,6 +82,17 @@ npm run start
 ## CLI Commands
 
 ### Basic Operations
+
+```bash
+# AI Product Tagging (NEW!)
+node src/index.js ai-tag              # Tag all untagged products
+node src/index.js ai-tag --dry-run    # Preview tagging without saving
+node src/index.js ai-list             # Show AI-tagged products
+```
+
+See [AI Tagging Documentation](docs/AI_TAGGING.md) for full details.
+
+### Product Monitoring
 
 ```bash
 # Run one-time product check

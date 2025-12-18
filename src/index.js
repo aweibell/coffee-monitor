@@ -5,6 +5,7 @@ const { hideBin } = require('yargs/helpers');
 const CoffeeMonitor = require('./monitor');
 const Config = require('./utils/config');
 const RoasteryDiscovery = require('./discovery/roastery-discovery');
+const { tagProducts, showAITaggedProducts } = require('./commands/ai-tag');
 const path = require('path');
 const fs = require('fs');
 
@@ -106,6 +107,41 @@ const argv = yargs(hideBin(process.argv))
         }
     }, async (argv) => {
         await discoverRoastery(argv);
+    })
+    .command('ai-tag', 'Tag products with AI-extracted attributes', {
+        'dry-run': {
+            description: 'Show sample tagging without saving',
+            type: 'boolean',
+            default: false
+        },
+        'force': {
+            description: 'Re-tag already tagged products',
+            type: 'boolean',
+            default: false
+        },
+        'limit': {
+            description: 'Maximum number of products to tag',
+            type: 'number'
+        }
+    }, async (argv) => {
+        await tagProducts({
+            configPath: argv.config,
+            limit: argv.limit,
+            force: argv.force,
+            dryRun: argv['dry-run']
+        });
+    })
+    .command('ai-list', 'Show AI-tagged products', {
+        'limit': {
+            description: 'Number of products to show',
+            type: 'number',
+            default: 20
+        }
+    }, async (argv) => {
+        await showAITaggedProducts({
+            configPath: argv.config,
+            limit: argv.limit
+        });
     })
     .help()
     .alias('help', 'h')

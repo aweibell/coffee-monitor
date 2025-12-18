@@ -39,6 +39,12 @@ class Notifier {
             case 'favorites_available_grouped':
                 notifications.push(...await this.notifyFavoritesAvailableGrouped(data));
                 break;
+            case 'favorites_newly_available':
+                notifications.push(...await this.notifyFavoritesNewlyAvailable(data));
+                break;
+            case 'favorites_newly_unavailable':
+                notifications.push(...await this.notifyFavoritesNewlyUnavailable(data));
+                break;
             case 'new_products':
                 notifications.push(...await this.notifyNewProducts(data));
                 break;
@@ -147,6 +153,116 @@ class Notifier {
         if (this.config.telegram?.enabled) {
             try {
                 const telegramSent = await this.sendTelegramNotification(message, 'favorites_grouped');
+                if (telegramSent) {
+                    notifications.push({ type: 'telegram', success: true, message: 'Telegram notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'telegram', success: false, error: error.message });
+            }
+        }
+
+        return notifications;
+    }
+
+    async notifyFavoritesNewlyAvailable(data) {
+        const { favorites } = data;
+        const notifications = [];
+
+        if (favorites.length === 0) return notifications;
+
+        // Get unique roastery names
+        const roasteryNames = [...new Set(favorites.map(f => f.product.roastery_name).filter(Boolean))];
+        const roasteryText = roasteryNames.length > 0 ? roasteryNames.join(', ') : 'ulike kaffibrenneri';
+        
+        const message = {
+            title: `🆕 ${favorites.length} Favorittkaffiar no tilgjengelege!`,
+            body: `${favorites.length} av dine favorittkaffiar er no tilgjengelege for første gong hjå ${roasteryText}!`,
+            favorites: favorites
+        };
+
+        // Email notification
+        if (this.config.email?.enabled) {
+            try {
+                const emailSent = await this.sendEmailNotification(message, 'favorites_newly_available');
+                if (emailSent) {
+                    notifications.push({ type: 'email', success: true, message: 'Email sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'email', success: false, error: error.message });
+            }
+        }
+
+        // Desktop notification
+        if (this.config.desktop?.enabled) {
+            try {
+                const desktopSent = await this.sendDesktopNotification(message);
+                if (desktopSent) {
+                    notifications.push({ type: 'desktop', success: true, message: 'Desktop notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'desktop', success: false, error: error.message });
+            }
+        }
+
+        // Telegram notification
+        if (this.config.telegram?.enabled) {
+            try {
+                const telegramSent = await this.sendTelegramNotification(message, 'favorites_newly_available');
+                if (telegramSent) {
+                    notifications.push({ type: 'telegram', success: true, message: 'Telegram notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'telegram', success: false, error: error.message });
+            }
+        }
+
+        return notifications;
+    }
+
+    async notifyFavoritesNewlyUnavailable(data) {
+        const { favorites } = data;
+        const notifications = [];
+
+        if (favorites.length === 0) return notifications;
+
+        // Get unique roastery names
+        const roasteryNames = [...new Set(favorites.map(f => f.product.roastery_name).filter(Boolean))];
+        const roasteryText = roasteryNames.length > 0 ? roasteryNames.join(', ') : 'ulike kaffibrenneri';
+        
+        const message = {
+            title: `📉 ${favorites.length} Favorittkaffiar blei utsolgt`,
+            body: `${favorites.length} av dine favorittkaffiar er no utsolgt hjå ${roasteryText}.`,
+            favorites: favorites
+        };
+
+        // Email notification
+        if (this.config.email?.enabled) {
+            try {
+                const emailSent = await this.sendEmailNotification(message, 'favorites_newly_unavailable');
+                if (emailSent) {
+                    notifications.push({ type: 'email', success: true, message: 'Email sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'email', success: false, error: error.message });
+            }
+        }
+
+        // Desktop notification
+        if (this.config.desktop?.enabled) {
+            try {
+                const desktopSent = await this.sendDesktopNotification(message);
+                if (desktopSent) {
+                    notifications.push({ type: 'desktop', success: true, message: 'Desktop notification sent' });
+                }
+            } catch (error) {
+                notifications.push({ type: 'desktop', success: false, error: error.message });
+            }
+        }
+
+        // Telegram notification
+        if (this.config.telegram?.enabled) {
+            try {
+                const telegramSent = await this.sendTelegramNotification(message, 'favorites_newly_unavailable');
                 if (telegramSent) {
                     notifications.push({ type: 'telegram', success: true, message: 'Telegram notification sent' });
                 }
@@ -326,6 +442,63 @@ class Notifier {
                 text += `Køyr og bestill før dei blir utsolgt! ☕`;
                 break;
 
+            case 'favorites_newly_available':
+                html += `
+                    <p>Hei! 🎉</p>
+                    <p>Gode nyheiter! ${message.favorites.length} av dine favorittkaffiar er no tilgjengelege for første gong:</p>
+                    <div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                `;
+                
+                text += `Hei! 🎉\n\nGode nyheiter! ${message.favorites.length} av dine favorittkaffiar er no tilgjengelege for første gong:\n\n`;
+                
+                message.favorites.forEach((favoriteData, index) => {
+                    const product = favoriteData.product;
+                    html += `
+                        <div style="margin-bottom: 15px; ${index > 0 ? 'border-top: 1px solid #ddd; padding-top: 15px;' : ''}">
+                            <h4 style="color: #8B4513; margin: 0;">🆕 ${product.name}</h4>
+                            ${product.current_price ? `<p style="margin: 5px 0;"><strong>Pris:</strong> ${product.current_price} kr</p>` : ''}
+                            <p style="margin: 5px 0; font-style: italic; color: #666;">Matches: ${favoriteData.favoriteName}</p>
+                            ${product.url ? `<p style="margin: 5px 0;"><a href="${product.url}" style="color: #8B4513;">Vis produkt</a></p>` : ''}
+                        </div>
+                    `;
+                    
+                    text += `🆕 ${product.name}\n`;
+                    if (product.current_price) text += `Pris: ${product.current_price} kr\n`;
+                    text += `Matches: ${favoriteData.favoriteName}\n`;
+                    if (product.url) text += `URL: ${product.url}\n`;
+                    text += `\n`;
+                });
+                
+                html += `</div><p>🚀 Køyr og bestill no før dei blir utsolgt! Dette er første gong desse er tilgjengelege.</p>`;
+                text += `🚀 Køyr og bestill no før dei blir utsolgt! Dette er første gong desse er tilgjengelege.`;
+                break;
+
+            case 'favorites_newly_unavailable':
+                html += `
+                    <p>Hei!</p>
+                    <p>${message.favorites.length} av dine favorittkaffiar er no utsolgt:</p>
+                    <div style="background-color: #ffe6e6; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                `;
+                
+                text += `Hei!\n\n${message.favorites.length} av dine favorittkaffiar er no utsolgt:\n\n`;
+                
+                message.favorites.forEach((favoriteData, index) => {
+                    const product = favoriteData.product;
+                    html += `
+                        <div style="margin-bottom: 15px; ${index > 0 ? 'border-top: 1px solid #ddd; padding-top: 15px;' : ''}">
+                            <h4 style="color: #8B4513; margin: 0;">📉 ${product.name}</h4>
+                            <p style="margin: 5px 0; font-style: italic; color: #666;">Var tilgjengeleg som: ${favoriteData.favoriteName}</p>
+                        </div>
+                    `;
+                    
+                    text += `📉 ${product.name}\n`;
+                    text += `Var tilgjengeleg som: ${favoriteData.favoriteName}\n\n`;
+                });
+                
+                html += `</div><p>📊 Vi held auge med når dei blir tilgjengelege igjen!</p>`;
+                text += `📊 Vi held auge med når dei blir tilgjengelege igjen!`;
+                break;
+
             case 'new_products':
                 html += `
                     <p>Hei!</p>
@@ -494,6 +667,72 @@ class Notifier {
                 });
                 
                 text += `🚀 Sjekk nettsida!`;
+                break;
+
+            case 'favorites_newly_available':
+                // Validate that we have favorites array
+                if (!message.favorites || !Array.isArray(message.favorites) || message.favorites.length === 0) {
+                    text = `🆕 Nye favorittkaffiar tilgjengelege!`;
+                    break;
+                }
+                
+                text = `🆕 ${message.favorites.length} nye favorittkaffiar tilgjengelege!\n\n`;
+                text += `🎉 Desse favorittkaffiane er no tilgjengelege for første gong:\n\n`;
+                
+                message.favorites.forEach((favoriteData, index) => {
+                    if (!favoriteData || !favoriteData.product) {
+                        return;
+                    }
+                    
+                    const product = favoriteData.product;
+                    const baseName = favoriteData.baseName || this.getBaseProductName(product.name);
+                    
+                    // Add organic indicator
+                    const organicIndicator = product.organic ? '🌱 ' : '';
+                    
+                    text += `${index + 1}. 🆕 ${organicIndicator}${baseName}\n`;
+                    if (product.roastery_name) text += `   🏪 ${product.roastery_name}\n`;
+                    if (product.current_price) {
+                        const size = this.extractSizeFromName(product.name);
+                        const pricePer250g = this.calculatePricePer250g(product.current_price, size);
+                        text += `   💰 ${product.current_price} kr`;
+                        if (pricePer250g) {
+                            text += ` (${pricePer250g} kr/250g)`;
+                        }
+                        text += `\n`;
+                    }
+                    if (favoriteData.favoriteName) text += `   ⭐ ${favoriteData.favoriteName}\n`;
+                    text += `\n`;
+                });
+                
+                text += `🚀 Dette er første gong desse er tilgjengelege - bestill no!`;
+                break;
+
+            case 'favorites_newly_unavailable':
+                // Validate that we have favorites array
+                if (!message.favorites || !Array.isArray(message.favorites) || message.favorites.length === 0) {
+                    text = `📉 Favorittkaffiar blei utsolgt`;
+                    break;
+                }
+                
+                text = `📉 ${message.favorites.length} favorittkaffiar blei utsolgt\n\n`;
+                text += `😔 Desse favorittkaffiane er no utsolgt:\n\n`;
+                
+                message.favorites.forEach((favoriteData, index) => {
+                    if (!favoriteData || !favoriteData.product) {
+                        return;
+                    }
+                    
+                    const product = favoriteData.product;
+                    const baseName = favoriteData.baseName || this.getBaseProductName(product.name);
+                    
+                    text += `${index + 1}. 📉 ${baseName}\n`;
+                    if (product.roastery_name) text += `   🏪 ${product.roastery_name}\n`;
+                    if (favoriteData.favoriteName) text += `   ⭐ Var: ${favoriteData.favoriteName}\n`;
+                    text += `\n`;
+                });
+                
+                text += `📊 Vi held auge med når dei blir tilgjengelege igjen!`;
                 break;
 
             case 'new_products':

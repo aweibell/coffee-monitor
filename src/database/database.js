@@ -102,7 +102,19 @@ class Database {
             'deep_scanned': 'BOOLEAN DEFAULT 0',
             'full_description': 'TEXT',
             'processing_method': 'TEXT',
-            'sustainability_info': 'TEXT'
+            'sustainability_info': 'TEXT',
+            'ai_country_of_origin': 'TEXT',
+            'ai_region': 'TEXT',
+            'ai_process_method': 'TEXT',
+            'ai_roast_level': 'TEXT',
+            'ai_variety': 'TEXT',
+            'ai_is_organic': 'BOOLEAN DEFAULT 0',
+            'ai_is_fair_trade': 'BOOLEAN DEFAULT 0',
+            'ai_is_decaf': 'BOOLEAN DEFAULT 0',
+            'ai_flavor_notes': 'TEXT',
+            'ai_certifications': 'TEXT',
+            'ai_confidence': 'INTEGER',
+            'ai_tagged_at': 'DATETIME'
         };
         
         for (const [columnName, columnDef] of Object.entries(requiredColumns)) {
@@ -339,6 +351,74 @@ class Database {
         `, [productId, notificationType, hoursAgo]);
         
         return result.count > 0;
+    }
+
+    async getProductAvailabilityChange(productId) {
+        // Get the last two availability records to detect state changes
+        const recentHistory = await this.all(`
+            SELECT available, checked_at FROM availability_history 
+            WHERE product_id = ? 
+            ORDER BY checked_at DESC 
+            LIMIT 2
+        `, [productId]);
+        
+        if (recentHistory.length < 2) {
+            // If this is the first or second record, treat current state as "new"
+            return {
+                isNewlyAvailable: recentHistory.length > 0 && recentHistory[0].available === 1,
+                isNewlyUnavailable: recentHistory.length > 0 && recentHistory[0].available === 0,
+                isStateChange: recentHistory.length === 1 // First time seeing this product
+            };
+        }
+        
+        const [current, previous] = recentHistory;
+        const isNewlyAvailable = current.available === 1 && previous.available === 0;
+        const isNewlyUnavailable = current.available === 0 && previous.available === 1;
+        const isStateChange = current.available !== previous.available;
+        
+        return {
+            isNewlyAvailable,
+            isNewlyUnavailable,
+            isStateChange,
+            currentState: current.available === 1,
+            previousState: previous.available === 1
+        };
+    }
+
+    async saveAITags(productId, tags) {
+        const flavorNotesJson = JSON.stringify(tags.flavor_notes || []);
+        const certificationsJson = JSON.stringify(tags.certifications || []);
+        
+        await this.run(`
+            UPDATE products SET 
+                ai_country_of_origin = ?,
+                ai_region = ?,
+                ai_process_method = ?,
+                ai_roast_level = ?,
+                ai_variety = ?,
+                ai_is_organic = ?,
+                ai_is_fair_trade = ?,
+                ai_is_decaf = ?,
+                ai_flavor_notes = ?,
+                ai_certifications = ?,
+                ai_confidence = ?,
+                ai_tagged_at = ?
+            WHERE id = ?
+        `, [
+            tags.country_of_origin,
+            tags.region,
+            tags.process_method,
+            tags.roast_level,
+            tags.variety,
+            tags.is_organic ? 1 : 0,
+            tags.is_fair_trade ? 1 : 0,
+            tags.is_decaf ? 1 : 0,
+            flavorNotesJson,
+            certificationsJson,
+            tags.confidence,
+            tags.tagged_at,
+            productId
+        ]);
     }
 
     async close() {
