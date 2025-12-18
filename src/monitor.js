@@ -272,23 +272,64 @@ class CoffeeMonitor {
                 await this.performDeepScan(allScrapedProducts, options.forceAll);
             }
 
-            // AI tag new products before sending notifications
+            // AI tag new products and detect product groups
             if (this.aiTagger.isEnabled() && results.newProducts.length > 0) {
                 this.log('info', `AI tagging ${results.newProducts.length} new products...`);
                 try {
                     const tags = await this.aiTagger.tagProducts(results.newProducts);
+                    const { generateProductGroupId } = require('./utils/product-grouping');
+                    
+                    // Track which product groups are truly new
+                    const productGroupsSeen = new Map();
+                    const trulyNewProducts = [];
+                    const newVariants = [];
                     
                     for (let i = 0; i < results.newProducts.length; i++) {
                         const product = results.newProducts[i];
                         const productTags = tags[i];
                         
-                        await this.database.saveAITags(product.id, productTags);
+                        // Save AI tags (this also computes product_group_id)
+                        await this.database.saveAITags(product.id, productTags, product.roastery_name, product.name);
                         
-                        // Add tags to the product object for notifications
+                        // Add tags to the product object
                         results.newProducts[i].aiTags = productTags;
+                        
+                        // Get the product group ID
+                        const productGroupId = generateProductGroupId(productTags, product.roastery_name);
+                        results.newProducts[i].product_group_id = productGroupId;
+                        
+                        if (productGroupId) {
+                            // Check if this product group already exists in database
+                            const existingGroup = await this.database.get(
+                                'SELECT id FROM products WHERE product_group_id = ? AND id != ?',
+                                [productGroupId, product.id]
+                            );
+                            
+                            if (existingGroup) {
+                                // This is a new variant of an existing product
+                                newVariants.push(results.newProducts[i]);
+                                this.log('info', `🔄 ${product.name} is a new variant of existing product`);
+                            } else if (productGroupsSeen.has(productGroupId)) {
+                                // Another size variant in the same check
+                                newVariants.push(results.newProducts[i]);
+                            } else {
+                                // This is a truly new product group
+                                trulyNewProducts.push(results.newProducts[i]);
+                                productGroupsSeen.set(productGroupId, product);
+                                this.log('info', `✨ ${product.name} is a new product`);
+                            }
+                        } else {
+                            // No product group (no AI tags or fallback)
+                            trulyNewProducts.push(results.newProducts[i]);
+                        }
                     }
                     
-                    this.log('info', `Successfully AI tagged ${results.newProducts.length} new products`);
+                    // Update results to only include truly new products for notifications
+                    results.allNewProducts = results.newProducts; // Keep full list
+                    results.newProducts = trulyNewProducts; // Only truly new for notifications
+                    results.newVariants = newVariants;
+                    
+                    this.log('info', `Successfully AI tagged. ${trulyNewProducts.length} new products, ${newVariants.length} new variants`);
                 } catch (error) {
                     this.log('warn', 'Failed to AI tag new products', { error: error.message });
                     // Don't fail the entire check if AI tagging fails
@@ -366,15 +407,45 @@ class CoffeeMonitor {
                 this.log('info', 'Newly unavailable favorites notification sent', { notifications });
             }
 
-            // Optionally notify about new products (if there are many, might want to batch)
+            // Notify about new products (grouped by product_group_id to show all sizes)
             if (results.newProducts.length > 0 && results.newProducts.length <= 5) {
-                this.log('info', `Sending new products notification for ${results.newProducts.length} products`);
+                this.log('info', `Sending new products notification for ${results.newProducts.length} product groups`);
                 
-                const notifications = await this.notifier.notify('new_products', {
-                    products: results.newProducts
-                });
+                // Group products by product_group_id and collect all variants
+                const { extractSize } = require('./utils/product-grouping');
+                const productGroups = new Map();
                 
-                this.log('info', 'New products notifications sent', { notifications });
+                for (const product of results.allNewProducts || results.newProducts) {
+                    const groupId = product.product_group_id || product.id;
+                    
+                    if (!productGroups.has(groupId)) {
+                        productGroups.set(groupId, {
+                            ...product,
+                            variants: [],
+                            availableSizes: []
+                        });
+                    }
+                    
+                    const group = productGroups.get(groupId);
+                    group.variants.push(product);
+                    
+                    const size = extractSize(product.name);
+                    if (size && !group.availableSizes.includes(size)) {
+                        group.availableSizes.push(size);
+                    }
+                }
+                
+                // Convert to array and only send if we have truly new product groups
+                const groupedProducts = Array.from(productGroups.values())
+                    .filter(group => results.newProducts.some(p => p.id === group.id));
+                
+                if (groupedProducts.length > 0) {
+                    const notifications = await this.notifier.notify('new_products', {
+                        products: groupedProducts
+                    });
+                    
+                    this.log('info', 'New products notifications sent', { notifications });
+                }
             }
 
         } catch (error) {

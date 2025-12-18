@@ -6,6 +6,7 @@ const CoffeeMonitor = require('./monitor');
 const Config = require('./utils/config');
 const RoasteryDiscovery = require('./discovery/roastery-discovery');
 const { tagProducts, showAITaggedProducts } = require('./commands/ai-tag');
+const { backfillProductGroups } = require('./commands/backfill-product-groups');
 const path = require('path');
 const fs = require('fs');
 
@@ -141,6 +142,11 @@ const argv = yargs(hideBin(process.argv))
         await showAITaggedProducts({
             configPath: argv.config,
             limit: argv.limit
+        });
+    })
+    .command('backfill-groups', 'Backfill product_group_id for existing AI-tagged products', {}, async (argv) => {
+        await backfillProductGroups({
+            configPath: argv.config
         });
     })
     .help()

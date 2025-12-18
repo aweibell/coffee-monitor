@@ -114,7 +114,9 @@ class Database {
             'ai_flavor_notes': 'TEXT',
             'ai_certifications': 'TEXT',
             'ai_confidence': 'INTEGER',
-            'ai_tagged_at': 'DATETIME'
+            'ai_tagged_at': 'DATETIME',
+            'product_group_id': 'TEXT',
+            'size_extracted': 'TEXT'
         };
         
         for (const [columnName, columnDef] of Object.entries(requiredColumns)) {
@@ -122,6 +124,13 @@ class Database {
                 console.log(`Adding missing column: ${columnName}`);
                 await this.run(`ALTER TABLE products ADD COLUMN ${columnName} ${columnDef}`);
             }
+        }
+        
+        // Create index on product_group_id if it doesn't exist
+        try {
+            await this.run('CREATE INDEX IF NOT EXISTS idx_product_group_id ON products(product_group_id)');
+        } catch (err) {
+            // Index might already exist, ignore
         }
     }
 
@@ -385,7 +394,22 @@ class Database {
         };
     }
 
-    async saveAITags(productId, tags) {
+    async saveAITags(productId, tags, roasteryName = null, productName = null) {
+        const { generateProductGroupId, extractSize } = require('../utils/product-grouping');
+        
+        // Get product info if not provided
+        if (!roasteryName || !productName) {
+            const product = await this.get('SELECT roastery_name, name FROM products WHERE id = ?', [productId]);
+            roasteryName = roasteryName || product.roastery_name;
+            productName = productName || product.name;
+        }
+        
+        // Generate product group ID from AI tags
+        const productGroupId = generateProductGroupId(tags, roasteryName);
+        
+        // Extract size from product name
+        const sizeExtracted = extractSize(productName);
+        
         const flavorNotesJson = JSON.stringify(tags.flavor_notes || []);
         const certificationsJson = JSON.stringify(tags.certifications || []);
         
@@ -402,7 +426,9 @@ class Database {
                 ai_flavor_notes = ?,
                 ai_certifications = ?,
                 ai_confidence = ?,
-                ai_tagged_at = ?
+                ai_tagged_at = ?,
+                product_group_id = ?,
+                size_extracted = ?
             WHERE id = ?
         `, [
             tags.country_of_origin,
@@ -417,6 +443,8 @@ class Database {
             certificationsJson,
             tags.confidence,
             tags.tagged_at,
+            productGroupId,
+            sizeExtracted,
             productId
         ]);
     }
