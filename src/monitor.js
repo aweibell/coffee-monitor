@@ -136,6 +136,11 @@ class CoffeeMonitor {
             totalChecked: allScrapedProducts.length
             };
 
+            // Track which products were seen in this scrape (by name and roastery)
+            const scrapedProductKeys = new Set(
+                allScrapedProducts.map(p => `${p.name}|||${p.roastery_name}`)
+            );
+
             // Process each product
             for (const productData of allScrapedProducts) {
                 try {
@@ -264,6 +269,79 @@ class CoffeeMonitor {
                     }
                 } catch (error) {
                     this.log('error', `Error processing product ${productData.name}`, { error: error.message });
+                }
+            }
+
+            // Mark products that are missing from this scrape as unavailable
+            // Get all products that were previously available
+            const previouslyAvailableProducts = await this.database.getAvailableProducts();
+            
+            for (const product of previouslyAvailableProducts) {
+                const productKey = `${product.name}|||${product.roastery_name}`;
+                
+                // If this product was not seen in the current scrape, mark it as unavailable
+                if (!scrapedProductKeys.has(productKey)) {
+                    this.log('info', `Product no longer on listing page: ${product.name} from ${product.roastery_name}`);
+                    
+                    // Record as unavailable
+                    await this.database.recordAvailability(
+                        product.id,
+                        0, // available = false
+                        product.current_price
+                    );
+                    
+                    // Check if this affects any favorites
+                    const availabilityChange = await this.database.getProductAvailabilityChange(product.id);
+                    const favorites = await this.database.getFavorites();
+                    
+                    for (const favorite of favorites) {
+                        let matches = false;
+                        
+                        // Check if any of the favorite's terms match the product name
+                        for (const term of favorite.terms) {
+                            if (product.name.toLowerCase().includes(term.toLowerCase())) {
+                                matches = true;
+                                break;
+                            }
+                        }
+                        
+                        if (matches && availabilityChange.isNewlyUnavailable) {
+                            // Apply preferences filtering
+                            let shouldNotify = true;
+                            
+                            // Check organic preference
+                            if (favorite.organic_only && !product.organic) {
+                                shouldNotify = false;
+                            }
+                            
+                            // Check size preference
+                            if (favorite.size_preference && favorite.size_preference !== 'both') {
+                                const productSize = this.extractSizeFromName(product.name);
+                                if (productSize && productSize !== favorite.size_preference) {
+                                    shouldNotify = false;
+                                }
+                            }
+                            
+                            if (shouldNotify) {
+                                results.newlyUnavailableFavorites.push({
+                                    product: {
+                                        ...product,
+                                        id: product.id,
+                                        current_price: product.current_price
+                                    },
+                                    favoriteName: favorite.name,
+                                    matchedTerms: favorite.terms.filter(term => 
+                                        product.name.toLowerCase().includes(term.toLowerCase())
+                                    ),
+                                    stateChange: 'newly_unavailable'
+                                });
+                                
+                                this.log('info', `📉 ${product.name} is no longer available (matches: ${favorite.name})`);
+                            }
+                            
+                            break; // Don't match the same product multiple times
+                        }
+                    }
                 }
             }
 
