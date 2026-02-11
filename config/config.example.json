@@ -1,34 +1,44 @@
 {
-  "roastery": {
-    "name": "Stavanger Kaffebrenneri",
-    "baseUrl": "https://stavangerkaffebrenneri.no/",
-    "shopUrls": [
-      {
-        "url": "https://www.stavangerkaffebrenneri.no/categories/kun-okologisk-kaffe",
-        "metadata": {
-          "organic": true,
-          "category": "all_sizes",
-          "description": "Organic coffee - all sizes"
+  "roasteries": [
+    {
+      "name": "Stavanger Kaffebrenneri",
+      "baseUrl": "https://stavangerkaffebrenneri.no/",
+      "shopUrls": [
+        {
+          "url": "https://www.stavangerkaffebrenneri.no/categories/kun-okologisk-kaffe",
+          "metadata": {
+            "organic": true,
+            "category": "all_sizes",
+            "description": "Organic coffee - all sizes"
+          }
+        },
+        {
+          "url": "https://www.stavangerkaffebrenneri.no/categories/kaffe-250g",
+          "metadata": {
+            "organic": false,
+            "category": "250g",
+            "description": "All coffee - 250g packages"
+          }
+        },
+        {
+          "url": "https://www.stavangerkaffebrenneri.no/categories/kaffe-1000g",
+          "metadata": {
+            "organic": false,
+            "category": "1kg",
+            "description": "All coffee - 1kg packages"
+          }
         }
-      },
-      {
-        "url": "https://www.stavangerkaffebrenneri.no/categories/kaffe-1000g",
-        "metadata": {
-          "organic": false,
-          "category": "1kg",
-          "description": "All coffee - 1kg packages"
-        }
+      ],
+      "selectors": {
+        "productContainer": ".product",
+        "name": ".title",
+        "price": ".price",
+        "description": "",
+        "link": "a",
+        "availability": ""
       }
-    ],
-    "selectors": {
-      "productContainer": ".product",
-      "name": ".title",
-      "price": ".price",
-      "description": "",
-      "link": "a",
-      "availability": ""
     }
-  },
+  ],
   "monitoring": {
     "checkInterval": "0 9 * * *",
     "maxRetries": 3,
@@ -62,20 +72,25 @@
       "sound": true
     }
   },
-  "favorites": [
-    {
-      "pattern": "Etiopia",
-      "description": "Etiopisk kaffi (Note: Favorites are now managed via CLI with multiple terms support)"
+  "favorites": [],
+  "preferences": {
+    "enabled": false,
+    "min_score": 1,
+    "dimensions": {
+      "continent": { "africa": 2 },
+      "country": { "ethiopia": 3, "kenya": 1 },
+      "process": { "natural": 3, "washed": 1 },
+      "organic": { "true": 2 },
+      "decaf": { "true": 2 }
     },
-    {
-      "pattern": "Koffeinfri", 
-      "description": "Koffeinfri kaffi"
-    },
-    {
-      "pattern": "Bærtørket",
-      "description": "Natural processed coffees"
-    }
-  ],
+    "constraints": [
+      {
+        "when": { "process": "natural" },
+        "require": { "organic": true },
+        "description": "Example: natural coffees must be organic"
+      }
+    ]
+  },
   "database": {
     "path": "./data/coffee.db"
   },

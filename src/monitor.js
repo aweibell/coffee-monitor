@@ -3,6 +3,7 @@ const Database = require('./database/database');
 const CoffeeScraper = require('./scrapers/scraper');
 const Notifier = require('./notifications/notifier');
 const AITagger = require('./processors/ai-tagger');
+const { normalizeProductAttributes, scoreProduct } = require('./utils/preferences');
 const Config = require('./utils/config');
 const path = require('path');
 const fs = require('fs');
@@ -130,11 +131,16 @@ class CoffeeMonitor {
             }
 
             const results = {
-            newProducts: [],
-            newlyAvailableFavorites: [],
-            newlyUnavailableFavorites: [],
-            totalChecked: allScrapedProducts.length
+                newProducts: [],
+                newlyAvailableFavorites: [],
+                newlyUnavailableFavorites: [],
+                // Preference-based matches for new products (when preferences are enabled)
+                preferenceMatches: [],
+                totalChecked: allScrapedProducts.length
             };
+
+            const preferences = this.config.getPreferencesConfig();
+            const preferencesEnabled = !!preferences.enabled;
 
             // Track which products were seen in this scrape (by name and roastery)
             const scrapedProductKeys = new Set(
@@ -163,51 +169,92 @@ class CoffeeMonitor {
                         });
                     }
 
-                    // Check for availability state changes for favorites
+                    // Check for availability state changes for favorites (legacy) when preferences are disabled
                     const availabilityChange = await this.database.getProductAvailabilityChange(productId);
-                    const favorites = await this.database.getFavorites();
-                    
-                    for (const favorite of favorites) {
-                        let matches = false;
+
+                    if (!preferencesEnabled) {
+                        const favorites = await this.database.getFavorites();
                         
-                        // Check if any of the favorite's terms match the product name
-                        for (const term of favorite.terms) {
-                            if (productData.name.toLowerCase().includes(term.toLowerCase())) {
-                                matches = true;
-                                break;
-                            }
-                        }
-                        
-                        if (matches) {
-                            // Apply preferences filtering
-                            let shouldNotify = true;
+                        for (const favorite of favorites) {
+                            let matches = false;
                             
-                            // Check organic preference
-                            if (favorite.organic_only && !productData.organic) {
-                                shouldNotify = false;
-                            }
-                            
-                            // Check size preference
-                            if (favorite.size_preference && favorite.size_preference !== 'both') {
-                                const productSize = this.extractSizeFromName(productData.name);
-                                if (productSize && productSize !== favorite.size_preference) {
-                                    shouldNotify = false;
+                            // Check if any of the favorite's terms match the product name
+                            for (const term of favorite.terms) {
+                                if (productData.name.toLowerCase().includes(term.toLowerCase())) {
+                                    matches = true;
+                                    break;
                                 }
                             }
                             
-                            if (shouldNotify) {
-                                // Notify about newly available favorites
-                                if (availabilityChange.isNewlyAvailable) {
-                                    // Check for duplicates in the same check based on base product name
-                                    const baseName = this.getBaseProductName(productData.name);
-                                    const existingMatch = results.newlyAvailableFavorites.find(item => 
-                                        this.getBaseProductName(item.product.name) === baseName &&
-                                        item.favoriteName === favorite.name
-                                    );
+                            if (matches) {
+                                // Apply preferences filtering
+                                let shouldNotify = true;
+                                
+                                // Check organic preference
+                                if (favorite.organic_only && !productData.organic) {
+                                    shouldNotify = false;
+                                }
+                                
+                                // Check size preference
+                                if (favorite.size_preference && favorite.size_preference !== 'both') {
+                                    const productSize = this.extractSizeFromName(productData.name);
+                                    if (productSize && productSize !== favorite.size_preference) {
+                                        shouldNotify = false;
+                                    }
+                                }
+                                
+                                if (shouldNotify) {
+                                    // Notify about newly available favorites
+                                    if (availabilityChange.isNewlyAvailable) {
+                                        // Check for duplicates in the same check based on base product name
+                                        const baseName = this.getBaseProductName(productData.name);
+                                        const existingMatch = results.newlyAvailableFavorites.find(item => 
+                                            this.getBaseProductName(item.product.name) === baseName &&
+                                            item.favoriteName === favorite.name
+                                        );
+                                        
+                                        if (!existingMatch) {
+                                            const currentSize = this.extractSizeFromName(productData.name);
+                                            results.newlyAvailableFavorites.push({
+                                                product: {
+                                                    ...productData,
+                                                    id: productId,
+                                                    current_price: productData.price
+                                                },
+                                                favoriteName: favorite.name,
+                                                matchedTerms: favorite.terms.filter(term => 
+                                                    productData.name.toLowerCase().includes(term.toLowerCase())
+                                                ),
+                                                baseName: baseName,
+                                                availableSizes: [currentSize].filter(Boolean),
+                                                sizeData: currentSize ? { [currentSize]: { price: productData.price, product: productData } } : {},
+                                                stateChange: 'newly_available'
+                                            });
+                                            
+                                            this.log('info', `🆕 ${productData.name} is now available (matches: ${favorite.name})`);
+                                        } else {
+                                            // Add the new size to the existing match
+                                            const currentSize = this.extractSizeFromName(productData.name);
+                                            if (currentSize && !existingMatch.availableSizes.includes(currentSize)) {
+                                                existingMatch.availableSizes.push(currentSize);
+                                                existingMatch.availableSizes.sort((a, b) => {
+                                                    if (a === '250g' && b === '1kg') return -1;
+                                                    if (a === '1kg' && b === '250g') return 1;
+                                                    return 0;
+                                                });
+                                                
+                                                if (!existingMatch.sizeData) existingMatch.sizeData = {};
+                                                existingMatch.sizeData[currentSize] = {
+                                                    price: productData.price,
+                                                    product: productData
+                                                };
+                                            }
+                                        }
+                                    }
                                     
-                                    if (!existingMatch) {
-                                        const currentSize = this.extractSizeFromName(productData.name);
-                                        results.newlyAvailableFavorites.push({
+                                    // Notify about newly unavailable favorites
+                                    if (availabilityChange.isNewlyUnavailable) {
+                                        results.newlyUnavailableFavorites.push({
                                             product: {
                                                 ...productData,
                                                 id: productId,
@@ -217,54 +264,16 @@ class CoffeeMonitor {
                                             matchedTerms: favorite.terms.filter(term => 
                                                 productData.name.toLowerCase().includes(term.toLowerCase())
                                             ),
-                                            baseName: baseName,
-                                            availableSizes: [currentSize].filter(Boolean),
-                                            sizeData: currentSize ? { [currentSize]: { price: productData.price, product: productData } } : {},
-                                            stateChange: 'newly_available'
+                                            stateChange: 'newly_unavailable'
                                         });
                                         
-                                        this.log('info', `🆕 ${productData.name} is now available (matches: ${favorite.name})`);
-                                    } else {
-                                        // Add the new size to the existing match
-                                        const currentSize = this.extractSizeFromName(productData.name);
-                                        if (currentSize && !existingMatch.availableSizes.includes(currentSize)) {
-                                            existingMatch.availableSizes.push(currentSize);
-                                            existingMatch.availableSizes.sort((a, b) => {
-                                                if (a === '250g' && b === '1kg') return -1;
-                                                if (a === '1kg' && b === '250g') return 1;
-                                                return 0;
-                                            });
-                                            
-                                            if (!existingMatch.sizeData) existingMatch.sizeData = {};
-                                            existingMatch.sizeData[currentSize] = {
-                                                price: productData.price,
-                                                product: productData
-                                            };
-                                        }
+                                        this.log('info', `📉 ${productData.name} is no longer available (matches: ${favorite.name})`);
                                     }
+                                } else {
+                                    this.log('debug', `Product ${productData.name} matches favorite ${favorite.name} but doesn't meet preferences`);
                                 }
-                                
-                                // Notify about newly unavailable favorites
-                                if (availabilityChange.isNewlyUnavailable) {
-                                    results.newlyUnavailableFavorites.push({
-                                        product: {
-                                            ...productData,
-                                            id: productId,
-                                            current_price: productData.price
-                                        },
-                                        favoriteName: favorite.name,
-                                        matchedTerms: favorite.terms.filter(term => 
-                                            productData.name.toLowerCase().includes(term.toLowerCase())
-                                        ),
-                                        stateChange: 'newly_unavailable'
-                                    });
-                                    
-                                    this.log('info', `📉 ${productData.name} is no longer available (matches: ${favorite.name})`);
-                                }
-                            } else {
-                                this.log('debug', `Product ${productData.name} matches favorite ${favorite.name} but doesn't meet preferences`);
+                                break; // Don't match the same product multiple times
                             }
-                            break; // Don't match the same product multiple times
                         }
                     }
                 } catch (error) {
@@ -290,56 +299,58 @@ class CoffeeMonitor {
                         product.current_price
                     );
                     
-                    // Check if this affects any favorites
+                    // Check if this affects any favorites (legacy behavior when preferences are disabled)
                     const availabilityChange = await this.database.getProductAvailabilityChange(product.id);
-                    const favorites = await this.database.getFavorites();
-                    
-                    for (const favorite of favorites) {
-                        let matches = false;
+                    if (!preferencesEnabled) {
+                        const favorites = await this.database.getFavorites();
                         
-                        // Check if any of the favorite's terms match the product name
-                        for (const term of favorite.terms) {
-                            if (product.name.toLowerCase().includes(term.toLowerCase())) {
-                                matches = true;
-                                break;
-                            }
-                        }
-                        
-                        if (matches && availabilityChange.isNewlyUnavailable) {
-                            // Apply preferences filtering
-                            let shouldNotify = true;
+                        for (const favorite of favorites) {
+                            let matches = false;
                             
-                            // Check organic preference
-                            if (favorite.organic_only && !product.organic) {
-                                shouldNotify = false;
-                            }
-                            
-                            // Check size preference
-                            if (favorite.size_preference && favorite.size_preference !== 'both') {
-                                const productSize = this.extractSizeFromName(product.name);
-                                if (productSize && productSize !== favorite.size_preference) {
-                                    shouldNotify = false;
+                            // Check if any of the favorite's terms match the product name
+                            for (const term of favorite.terms) {
+                                if (product.name.toLowerCase().includes(term.toLowerCase())) {
+                                    matches = true;
+                                    break;
                                 }
                             }
                             
-                            if (shouldNotify) {
-                                results.newlyUnavailableFavorites.push({
-                                    product: {
-                                        ...product,
-                                        id: product.id,
-                                        current_price: product.current_price
-                                    },
-                                    favoriteName: favorite.name,
-                                    matchedTerms: favorite.terms.filter(term => 
-                                        product.name.toLowerCase().includes(term.toLowerCase())
-                                    ),
-                                    stateChange: 'newly_unavailable'
-                                });
+                            if (matches && availabilityChange.isNewlyUnavailable) {
+                                // Apply preferences filtering
+                                let shouldNotify = true;
                                 
-                                this.log('info', `📉 ${product.name} is no longer available (matches: ${favorite.name})`);
+                                // Check organic preference
+                                if (favorite.organic_only && !product.organic) {
+                                    shouldNotify = false;
+                                }
+                                
+                                // Check size preference
+                                if (favorite.size_preference && favorite.size_preference !== 'both') {
+                                    const productSize = this.extractSizeFromName(product.name);
+                                    if (productSize && productSize !== favorite.size_preference) {
+                                        shouldNotify = false;
+                                    }
+                                }
+                                
+                                if (shouldNotify) {
+                                    results.newlyUnavailableFavorites.push({
+                                        product: {
+                                            ...product,
+                                            id: product.id,
+                                            current_price: product.current_price
+                                        },
+                                        favoriteName: favorite.name,
+                                        matchedTerms: favorite.terms.filter(term => 
+                                            product.name.toLowerCase().includes(term.toLowerCase())
+                                        ),
+                                        stateChange: 'newly_unavailable'
+                                    });
+                                    
+                                    this.log('info', `📉 ${product.name} is no longer available (matches: ${favorite.name})`);
+                                }
+                                
+                                break; // Don't match the same product multiple times
                             }
-                            
-                            break; // Don't match the same product multiple times
                         }
                     }
                 }
@@ -408,6 +419,45 @@ class CoffeeMonitor {
                     results.newVariants = newVariants;
                     
                     this.log('info', `Successfully AI tagged. ${trulyNewProducts.length} new products, ${newVariants.length} new variants`);
+
+                    // When preference-based scoring is enabled, compute matches for newly seen products
+                    if (preferencesEnabled && results.newProducts.length > 0) {
+                        try {
+                            const ids = results.newProducts.map(p => p.id);
+                            const placeholders = ids.map(() => '?').join(',');
+                            
+                            const scoredProducts = await this.database.all(`
+                                SELECT p.*, ah.available, ah.price as current_price, ah.checked_at
+                                FROM products p
+                                LEFT JOIN availability_history ah ON p.id = ah.product_id
+                                WHERE p.id IN (${placeholders})
+                                AND ah.id IN (
+                                    SELECT MAX(id) FROM availability_history 
+                                    WHERE product_id = p.id
+                                )
+                            `, ids);
+                            
+                            const matches = [];
+                            for (const row of scoredProducts) {
+                                const attrs = normalizeProductAttributes(row);
+                                const { score, accepted } = scoreProduct(attrs, preferences);
+                                if (!accepted) continue;
+                                
+                                matches.push({
+                                    product: row,
+                                    score,
+                                    attrs
+                                });
+                            }
+                            
+                            matches.sort((a, b) => b.score - a.score);
+                            results.preferenceMatches = matches;
+                            
+                            this.log('info', `Preference scoring found ${matches.length} interesting new products`);
+                        } catch (prefError) {
+                            this.log('warn', 'Failed to score new products with preferences', { error: prefError.message });
+                        }
+                    }
                 } catch (error) {
                     this.log('warn', 'Failed to AI tag new products', { error: error.message });
                     // Don't fail the entire check if AI tagging fails
@@ -451,8 +501,11 @@ class CoffeeMonitor {
 
     async sendNotifications(results) {
         try {
+            const preferences = this.config.getPreferencesConfig();
+            const preferencesEnabled = !!preferences.enabled;
+
             // Send notifications for newly available favorites
-            if (results.newlyAvailableFavorites.length > 0) {
+            if (!preferencesEnabled && results.newlyAvailableFavorites.length > 0) {
                 this.log('info', `Sending newly available favorites notification for ${results.newlyAvailableFavorites.length} products`);
                 
                 const notifications = await this.notifier.notify('favorites_newly_available', {
@@ -469,7 +522,7 @@ class CoffeeMonitor {
             }
 
             // Send notifications for newly unavailable favorites
-            if (results.newlyUnavailableFavorites.length > 0) {
+            if (!preferencesEnabled && results.newlyUnavailableFavorites.length > 0) {
                 this.log('info', `Sending newly unavailable favorites notification for ${results.newlyUnavailableFavorites.length} products`);
                 
                 const notifications = await this.notifier.notify('favorites_newly_unavailable', {
@@ -485,8 +538,21 @@ class CoffeeMonitor {
                 this.log('info', 'Newly unavailable favorites notification sent', { notifications });
             }
 
+            // When preferences are enabled, notify about new products that match preferences
+            if (preferencesEnabled && results.preferenceMatches && results.preferenceMatches.length > 0) {
+                const products = results.preferenceMatches.map(match => match.product);
+                
+                this.log('info', `Sending preference-based new products notification for ${products.length} products`);
+                
+                const notifications = await this.notifier.notify('new_products', {
+                    products
+                });
+                
+                this.log('info', 'Preference-based new products notifications sent', { notifications });
+            }
+
             // Notify about new products (grouped by product_group_id to show all sizes)
-            if (results.newProducts.length > 0 && results.newProducts.length <= 5) {
+            if (!preferencesEnabled && results.newProducts.length > 0 && results.newProducts.length <= 5) {
                 this.log('info', `Sending new products notification for ${results.newProducts.length} product groups`);
                 
                 // Group products by product_group_id and collect all variants
@@ -580,31 +646,55 @@ class CoffeeMonitor {
         try {
             const availableProducts = await this.database.getAvailableProducts();
             const favorites = await this.database.getFavorites();
+            const preferences = this.config.getPreferencesConfig();
+            const preferencesEnabled = !!preferences.enabled;
             
-            // Get matching favorites that are currently available
+            // Legacy favorites-based matching (used when preferences are disabled)
             const availableFavorites = [];
-            for (const product of availableProducts) {
-                for (const favorite of favorites) {
-                    let matches = false;
-                    let matchedTerms = [];
-                    
-                    // Check if any of the favorite's terms match the product name
-                    for (const term of favorite.terms) {
-                        if (product.name.toLowerCase().includes(term.toLowerCase())) {
-                            matches = true;
-                            matchedTerms.push(term);
+            if (!preferencesEnabled) {
+                for (const product of availableProducts) {
+                    for (const favorite of favorites) {
+                        let matches = false;
+                        let matchedTerms = [];
+                        
+                        // Check if any of the favorite's terms match the product name
+                        for (const term of favorite.terms) {
+                            if (product.name.toLowerCase().includes(term.toLowerCase())) {
+                                matches = true;
+                                matchedTerms.push(term);
+                            }
+                        }
+                        
+                        if (matches) {
+                            availableFavorites.push({
+                                ...product,
+                                favoritePattern: matchedTerms.join(', '),
+                                favoriteName: favorite.name
+                            });
+                            break;
                         }
                     }
-                    
-                    if (matches) {
-                        availableFavorites.push({
-                            ...product,
-                            favoritePattern: matchedTerms.join(', '),
-                            favoriteName: favorite.name
-                        });
-                        break;
-                    }
                 }
+            }
+
+            // Preference-based scoring of currently available products
+            let preferenceMatches = [];
+            if (preferencesEnabled) {
+                for (const product of availableProducts) {
+                    const attrs = normalizeProductAttributes(product);
+                    const { score, accepted, reasons } = scoreProduct(attrs, preferences);
+                    if (!accepted) continue;
+
+                    preferenceMatches.push({
+                        product,
+                        score,
+                        attrs,
+                        reasons
+                    });
+                }
+
+                // Sort by score descending
+                preferenceMatches.sort((a, b) => b.score - a.score);
             }
 
             return {
@@ -613,7 +703,9 @@ class CoffeeMonitor {
                 availableFavorites: availableFavorites.length,
                 lastCheck: this.lastCheck,
                 products: availableProducts.slice(0, 20), // Limit to first 20
-                favorites: availableFavorites
+                favorites: availableFavorites,
+                preferencesEnabled,
+                preferredProducts: preferenceMatches.slice(0, 20)
             };
             
         } catch (error) {

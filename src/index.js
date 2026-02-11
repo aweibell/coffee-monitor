@@ -234,21 +234,49 @@ async function showReport(argv) {
         
         console.log(`Last check: ${report.lastCheck ? report.lastCheck.toLocaleString() : 'Never'}`);
         console.log(`Total available products: ${report.totalAvailableProducts}`);
-        console.log(`Total favorites configured: ${report.totalFavorites}`);
-        console.log(`Available favorites: ${report.availableFavorites}`);
         
-        if (report.favorites.length > 0) {
-            console.log('\n☕ Available Favorite Products:');
-            report.favorites.forEach(product => {
-                console.log(`   • ${product.name} (${product.current_price || 'N/A'} kr)`);
-                console.log(`     Pattern: "${product.favoritePattern}"`);
-                if (product.url) {
-                    console.log(`     URL: ${product.url}`);
-                }
-                console.log('');
-            });
+        if (report.preferencesEnabled) {
+            console.log('Preference scoring: enabled');
+            console.log(`Preferred products (score ≥ min): ${report.preferredProducts.length}`);
+            if (report.preferredProducts.length > 0) {
+                console.log('\n☕ Preferred Products (by score):');
+                report.preferredProducts.forEach(({ product, score, attrs, reasons }) => {
+                    const priceKg = attrs.price_per_kg != null ? ` (${Math.round(attrs.price_per_kg)} kr/kg)` : '';
+                    console.log(`   • ${product.name} (${product.current_price || 'N/A'} kr${priceKg})`);
+                    // Format reasons: "organic:true+3" -> "organic +3", "country:ethiopia+3" -> "ethiopia +3"
+                    const formatReason = (r) => {
+                        const match = r.match(/^([^:]+):(.+?)([+-]\d+)$/);
+                        if (!match) return r;
+                        const [, dim, val, pts] = match;
+                        // For boolean dimensions, just show the dimension name
+                        if (val === 'true') return `${dim} ${pts}`;
+                        // For other dimensions, show the value
+                        return `${val} ${pts}`;
+                    };
+                    const reasonsStr = reasons && reasons.length > 0 
+                        ? reasons.map(formatReason).join(', ') 
+                        : 'no matching dimensions';
+                    console.log(`     Score: ${score}  |  ${reasonsStr}`);
+                    if (product.url) console.log(`     URL: ${product.url}`);
+                    console.log('');
+                });
+            } else {
+                console.log('\n😔 No products match your preferences (min_score not met).');
+            }
         } else {
-            console.log('\n😔 No favorite products are currently available.');
+            console.log(`Total favorites configured: ${report.totalFavorites}`);
+            console.log(`Available favorites: ${report.availableFavorites}`);
+            if (report.favorites.length > 0) {
+                console.log('\n☕ Available Favorite Products:');
+                report.favorites.forEach(product => {
+                    console.log(`   • ${product.name} (${product.current_price || 'N/A'} kr)`);
+                    console.log(`     Pattern: "${product.favoritePattern}"`);
+                    if (product.url) console.log(`     URL: ${product.url}`);
+                    console.log('');
+                });
+            } else {
+                console.log('\n😔 No favorite products are currently available.');
+            }
         }
         
         if (report.products.length > 0) {

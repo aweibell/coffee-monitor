@@ -6,6 +6,7 @@ A web scraping service that monitors your local coffee roastery's website for pr
 
 - 🔍 **Web Scraping**: Automatically scrape coffee roastery websites for product information
 - ⭐ **Favorites Tracking**: Define favorite coffee patterns (e.g., "Ethiopia", "Natural Process") 
+- 🎯 **Preference Scoring (Optional)**: Configure generic preferences by country, continent, process, roast, organic, roastery, etc., to score and highlight interesting coffees
 - 🤖 **AI Product Tagging**: Automatically extract origin, process method, certifications, and more using OpenAI
 - 📧 **Email Notifications**: Get notified when favorite coffees become available
 - 🖥️ **Desktop Notifications**: Native desktop notifications on Linux
@@ -128,6 +129,47 @@ node src/index.js favorites --add "Geisha" --description "Geisha variety"
 
 # Remove a favorite by name
 node src/index.js favorites --remove "Ethiopian"
+```
+
+### Preference-Based Scoring (Optional)
+
+If you enable the generic preference system in `config/config.json` under `preferences`, the monitor will:
+
+- Score each available product using your configured dimensions (country, continent, process, roast, organic, roastery, etc.).
+- Apply generic constraints (for example: `"natural"` must also be organic).
+- Include a `preferredProducts` list in the `report` output, sorted by score.
+- Use preference-based matches for new-product notifications instead of favorites when `preferences.enabled` is true.
+
+Example snippet from `config/config.json`:
+
+```json
+"preferences": {
+  "enabled": true,
+  "min_score": 1,
+  "dimensions": {
+    "continent": {
+      "africa": 2
+    },
+    "country": {
+      "ethiopia": 3,
+      "kenya": 1
+    },
+    "process": {
+      "natural": 3,
+      "washed": 1
+    },
+    "organic": {
+      "true": 2
+    }
+  },
+  "constraints": [
+    {
+      "when": { "process": "natural" },
+      "require": { "organic": true },
+      "description": "Natural coffees must be organic"
+    }
+  ]
+}
 ```
 
 ### Configuration

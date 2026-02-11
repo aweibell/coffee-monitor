@@ -14,6 +14,7 @@ class Config {
             if (fs.existsSync(this.configPath)) {
                 const configData = fs.readFileSync(this.configPath, 'utf8');
                 this.config = JSON.parse(configData);
+                this.normalizeRoasteries();
                 this.applyEnvironmentOverrides();
                 this.validate();
             } else {
@@ -25,14 +26,33 @@ class Config {
         }
     }
 
+    /**
+     * Accept both "roastery" (single) and "roasteries" (array). Normalize to roasteries array.
+     */
+    normalizeRoasteries() {
+        if (!this.config) return;
+        if (this.config.roasteries && Array.isArray(this.config.roasteries) && this.config.roasteries.length > 0) {
+            return;
+        }
+        if (this.config.roastery && typeof this.config.roastery === 'object') {
+            const r = this.config.roastery;
+            this.config.roasteries = [{
+                name: r.name,
+                baseUrl: r.baseUrl,
+                shopUrls: r.shopUrls || (r.shopUrl ? [{ url: r.shopUrl, metadata: { organic: false, category: 'all_sizes', description: 'Migrated' } }] : []),
+                selectors: r.selectors || {}
+            }];
+        }
+    }
+
     validate() {
         if (!this.config) {
             throw new Error('Config is empty');
         }
 
-        // Validate multi-roastery format
+        // Validate multi-roastery format (after normalization)
         if (!this.config.roasteries || !Array.isArray(this.config.roasteries) || this.config.roasteries.length === 0) {
-            throw new Error('roasteries must be a non-empty array');
+            throw new Error('roasteries must be a non-empty array (or provide a single "roastery" object)');
         }
 
         for (const [index, roastery] of this.config.roasteries.entries()) {
@@ -201,6 +221,43 @@ class Config {
 
     getNotificationConfig() {
         return this.config.notifications;
+    }
+
+    /**
+     * Get preference configuration for scoring products.
+     *
+     * Structure example (all keys optional):
+     * {
+     *   "enabled": true,
+     *   "min_score": 1,
+     *   "dimensions": {
+     *     "country": { "ethiopia": 3, "kenya": 1 },
+     *     "process": { "natural": 3, "washed": 1 },
+     *     "organic": { "true": 2 },
+     *     "roastery": { "stavanger kaffebrenneri": 1 }
+     *   },
+     *   "constraints": [
+     *     { "when": { "process": "natural" }, "require": { "organic": true } }
+     *   ]
+     * }
+     */
+    getPreferencesConfig() {
+        // If not present, default to disabled preferences
+        const prefs = this.config.preferences || {};
+        if (prefs.enabled === undefined) {
+            // Disabled by default until user explicitly enables
+            prefs.enabled = false;
+        }
+        if (prefs.min_score === undefined) {
+            prefs.min_score = 0;
+        }
+        if (!prefs.dimensions) {
+            prefs.dimensions = {};
+        }
+        if (!prefs.constraints) {
+            prefs.constraints = [];
+        }
+        return prefs;
     }
 
     getFavorites() {

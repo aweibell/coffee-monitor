@@ -1,0 +1,183 @@
+{
+  "notifications": {
+    "email": {
+      "enabled": false,
+      "smtp": {
+        "host": "smtp.gmail.com",
+        "port": 587,
+        "secure": false,
+        "auth": {
+          "user": "aweibell@gmail.com",
+          "pass": "your-app-password"
+        }
+      },
+      "from": "aweibell@gmail.com",
+      "to": [
+        "atle@weibell.no"
+      ],
+      "subject": "☕ [coffee-monitor] Ny kaffi frå ulike brenneri!"
+    },
+    "desktop": {
+      "enabled": true,
+      "title": "Coffee Monitor",
+      "sound": true
+    },
+    "telegram": {
+      "enabled": true,
+      "title": "Coffee Monitor",
+      "sound": true
+    }
+  },
+  "monitoring": {
+    "checkInterval": "0 9 * * *",
+    "maxRetries": 3,
+    "requestTimeout": 30000,
+    "screenshotOnError": true
+  },
+  "favorites": [
+    {
+      "pattern": "Etiopia",
+      "description": "Etiopisk kaffi (Note: Favorites are now managed via CLI with multiple terms support)"
+    },
+    {
+      "pattern": "Koffeinfri",
+      "description": "Koffeinfri kaffi"
+    },
+    {
+      "pattern": "Bærtørket",
+      "description": "Natural processed coffees"
+    }
+  ],
+  "database": {
+    "path": "./data/coffee.db"
+  },
+  "logging": {
+    "level": "info",
+    "file": "./logs/coffee-monitor.log",
+    "maxSize": "10MB",
+    "maxFiles": 5
+  },
+  "roasteries": [
+    {
+      "name": "Stavanger Kaffebrenneri",
+      "baseUrl": "https://stavangerkaffebrenneri.no/",
+      "shopUrls": [
+        {
+          "url": "https://www.stavangerkaffebrenneri.no/categories/kun-okologisk-kaffe",
+          "metadata": {
+            "organic": true,
+            "category": "all_sizes",
+            "description": "Organic coffee - all sizes"
+          }
+        },
+        {
+          "url": "https://www.stavangerkaffebrenneri.no/categories/kaffe-250g",
+          "metadata": {
+            "organic": false,
+            "category": "250g",
+            "description": "All coffee - 250g packages"
+          }
+        },
+        {
+          "url": "https://www.stavangerkaffebrenneri.no/categories/kaffe-1000g",
+          "metadata": {
+            "organic": false,
+            "category": "1kg",
+            "description": "All coffee - 1kg packages"
+          }
+        }
+      ],
+      "selectors": {
+        "productContainer": ".product",
+        "name": ".title",
+        "price": ".price",
+        "description": "",
+        "link": "a",
+        "availability": ""
+      }
+    },
+    {
+      "name": "Nandi Coffee",
+      "baseUrl": "https://nandicoffee.no/",
+      "shopUrls": [
+        {
+          "url": "https://nandicoffee.no/shop/",
+          "metadata": {
+            "organic": false,
+            "category": "all_sizes",
+            "description": "All coffee products"
+          }
+        }
+      ],
+      "selectors": {
+        "productContainer": ".product, .woocommerce-product",
+        "name": ".woocommerce-loop-product__title, .product-title, h2",
+        "price": ".price, .woocommerce-Price-amount",
+        "description": "",
+        "link": "a",
+        "availability": ".stock"
+      }
+    },
+    {
+      "name": "Mukasa Kaffebrenneri",
+      "baseUrl": "https://mukasa.no",
+      "shopUrls": [
+        {
+          "url": "https://mukasa.no/produktkategori/fersk-kaffe/",
+          "metadata": {
+            "organic": false,
+            "category": "all_sizes",
+            "description": "All coffee products"
+          }
+        }
+      ],
+      "selectors": {
+        "productContainer": ".product, .woocommerce-product, .wc-product, .product, .item, [class*=\"product\"]",
+        "name": ".woocommerce-loop-product__title, .product-title, h2.woocommerce-loop-product__title, h2, h3, .title, [class*=\"title\"], [class*=\"name\"]",
+        "price": ".price, .woocommerce-Price-amount, .amount, [class*=\"price\"], [class*=\"cost\"]",
+        "link": "a",
+        "availability": ".stock, .in-stock, .out-of-stock, [class*=\"stock\"], [class*=\"availability\"]"
+      }
+    },
+    {
+      "name": "Myksvoll Mikrobrenneri",
+      "baseUrl": "https://handbrent.no",
+      "shopUrls": [
+        {
+          "url": "https://handbrent.no/collections/all",
+          "metadata": {
+            "category": "all_sizes",
+            "description": "Auto-discovered shop URL"
+          }
+        }
+      ],
+      "selectors": {
+        "productContainer": ".product-item, .product-card, .grid__item, .product, .product, .item, [class*=\"product\"]",
+        "name": ".product-item__title, .product-card__title, .product__title, h3, h2, h3, .title, [class*=\"title\"], [class*=\"name\"]",
+        "price": ".price, .product-item__price, .money, .product__price, [class*=\"price\"], [class*=\"cost\"]",
+        "link": "a",
+        "availability": ".product-form__buttons, .product__availability, [class*=\"stock\"], [class*=\"availability\"]"
+      }
+    },
+    {
+      "name": "Austrått Kaffebrenneri",
+      "baseUrl": "https://austraattkaffebrenneri.no",
+      "shopUrls": [
+        {
+          "url": "https://austraattkaffebrenneri.no/butikk/kaffe",
+          "metadata": {
+            "category": "all_sizes",
+            "description": "Auto-discovered shop URL"
+          }
+        }
+      ],
+      "selectors": {
+        "productContainer": ".product, .item, [class*=\"product\"]",
+        "name": "h2, h3, .title, [class*=\"title\"], [class*=\"name\"]",
+        "price": "[class*=\"price\"], [class*=\"cost\"]",
+        "link": "a",
+        "availability": "[class*=\"stock\"], [class*=\"availability\"]"
+      }
+    }
+  ]
+}

@@ -116,7 +116,8 @@ class Database {
             'ai_confidence': 'INTEGER',
             'ai_tagged_at': 'DATETIME',
             'product_group_id': 'TEXT',
-            'size_extracted': 'TEXT'
+            'size_extracted': 'TEXT',
+            'size_grams': 'INTEGER'
         };
         
         for (const [columnName, columnDef] of Object.entries(requiredColumns)) {
@@ -409,6 +410,7 @@ class Database {
         
         // Extract size from product name
         const sizeExtracted = extractSize(productName);
+        const sizeGrams = this._inferSizeGrams(sizeExtracted);
         
         const flavorNotesJson = JSON.stringify(tags.flavor_notes || []);
         const certificationsJson = JSON.stringify(tags.certifications || []);
@@ -428,7 +430,8 @@ class Database {
                 ai_confidence = ?,
                 ai_tagged_at = ?,
                 product_group_id = ?,
-                size_extracted = ?
+                size_extracted = ?,
+                size_grams = ?
             WHERE id = ?
         `, [
             tags.country_of_origin,
@@ -445,8 +448,35 @@ class Database {
             tags.tagged_at,
             productGroupId,
             sizeExtracted,
+            sizeGrams,
             productId
         ]);
+    }
+
+    /**
+     * Internal helper to infer size in grams from a normalized size string (e.g. "250g", "1kg").
+     * Returns null if size cannot be determined.
+     */
+    _inferSizeGrams(size) {
+        if (!size) return null;
+
+        const value = String(size).trim().toLowerCase();
+
+        // Simple patterns like "250g", "1000g"
+        const gramMatch = value.match(/(\d+)\s*g/);
+        if (gramMatch) {
+            const grams = parseInt(gramMatch[1], 10);
+            return Number.isFinite(grams) ? grams : null;
+        }
+
+        // Patterns like "1kg", "2 kg"
+        const kgMatch = value.match(/(\d+)\s*kg/);
+        if (kgMatch) {
+            const kg = parseInt(kgMatch[1], 10);
+            return Number.isFinite(kg) ? kg * 1000 : null;
+        }
+
+        return null;
     }
 
     async close() {
